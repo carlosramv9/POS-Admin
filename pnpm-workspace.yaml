@@ -22,3 +22,4 @@ onlyBuiltDependencies:
 
 ignoredBuiltDependencies:
   - sharp
+

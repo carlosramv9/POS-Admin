@@ -175,7 +175,7 @@ describe('InventoryEngine', () => {
   });
 
   describe('applyProductStockDelta — siembra de la fila', () => {
-    it('fila inexistente → la siembra con los valores comerciales del producto', async () => {
+    it('fila inexistente → la siembra en CERO con los valores comerciales del producto', async () => {
       const tx = makeTx();
       await engine.applyProductStockDelta(tx as never, { productId: 'p1', tenantId: 't1', delta: -2 });
 
@@ -185,12 +185,17 @@ describe('InventoryEngine', () => {
         where: { branchId_variantId: { branchId: 'b-main', variantId: 'v-p1' } },
         select: { branchId: true },
       });
+      // La existencia arranca en 0, NO en `product.stock` (7). Que la fila no
+      // exista significa que en esa sucursal nunca hubo existencia de esa
+      // variante; copiar el espejo legacy —la suma de todas las variantes de
+      // todas las sucursales— multiplicaba el inventario cada vez que aparecía
+      // una combinación nueva. Los valores comerciales sí se heredan.
       expect(tx.branchInventory.create).toHaveBeenCalledWith({
         data: {
           branchId: 'b-main',
           productId: 'p1',
           variantId: 'v-p1',
-          stock: 7,
+          stock: 0,
           price: 100,
           cost: 60,
           comparePrice: 120,
@@ -406,12 +411,14 @@ describe('InventoryEngine', () => {
       });
     });
 
-    it('resta sin fila → la siembra desde el producto y luego aplica el delta', async () => {
+    it('resta sin fila → la siembra en CERO y luego aplica el delta (que no alcanza)', async () => {
       const tx = makeTx();
       tx.product.findFirst.mockResolvedValue({ ...PRODUCT_ROW, stock: 9 });
       await engine.applyBranchInventoryDelta(tx as never, 'b1', 'p1', 't1', -2);
+      // La fila nace en 0, no con las 9 del espejo legacy: en esta sucursal
+      // nunca hubo existencia de esta variante.
       expect(tx.branchInventory.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ branchId: 'b1', productId: 'p1', variantId: 'v-p1', stock: 9 }),
+        data: expect.objectContaining({ branchId: 'b1', productId: 'p1', variantId: 'v-p1', stock: 0 }),
       });
       expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
         where: { branchId: 'b1', variantId: 'v-p1', stock: { gte: 2 } },
@@ -419,12 +426,12 @@ describe('InventoryEngine', () => {
       });
     });
 
-    it('suma sin fila → la siembra desde el producto y suma', async () => {
+    it('suma sin fila → la siembra en CERO y suma', async () => {
       const tx = makeTx();
       tx.product.findFirst.mockResolvedValue({ ...PRODUCT_ROW, stock: 5 });
       await engine.applyBranchInventoryDelta(tx as never, 'b1', 'p1', 't1', 3);
       expect(tx.branchInventory.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ branchId: 'b1', productId: 'p1', variantId: 'v-p1', stock: 5 }),
+        data: expect.objectContaining({ branchId: 'b1', productId: 'p1', variantId: 'v-p1', stock: 0 }),
       });
       expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
         where: { branchId: 'b1', variantId: 'v-p1' },

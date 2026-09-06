@@ -255,6 +255,14 @@ export class InventoryEngine {
    * valores comerciales actuales del producto. Sin esto, un `updateMany` sobre
    * una fila inexistente afectaría 0 filas y el movimiento se perdería en
    * silencio — el modo de falla más peligroso de este motor.
+   *
+   * La fila nace con existencia CERO. Que no exista significa exactamente que en
+   * esa sucursal nunca hubo existencia de esa variante; sembrarla con
+   * `product.stock` —el espejo legacy, que es la suma de todas las variantes de
+   * todas las sucursales— multiplicaba el inventario cada vez que aparecía una
+   * combinación nueva (una sucursal recién creada, una variante recién añadida).
+   * El delta del llamador se aplica encima, que es lo único que este método debe
+   * dejar pasar.
    */
   private async ensureBranchInventoryRow(
     tx: Prisma.TransactionClient,
@@ -275,7 +283,6 @@ export class InventoryEngine {
     const product = await tx.product.findFirst({
       where: { id: productId, tenantId },
       select: {
-        stock: true,
         price: true,
         costPrice: true,
         comparePrice: true,
@@ -295,7 +302,7 @@ export class InventoryEngine {
         branchId,
         productId,
         variantId,
-        stock: product.stock,
+        stock: 0,
         price: product.price,
         cost: product.costPrice,
         comparePrice: product.comparePrice,

@@ -527,13 +527,22 @@ function VariantsEditor({
                   onChange={(e) => updateItem(idx, { name: e.target.value })}
                   className="w-full px-2 py-1.5 border border-border rounded-md text-[12px] bg-card outline-none focus:border-primary"
                 />
+                {/* La existencia solo se captura al ALTA de la variante. En una
+                    variante que ya existe (trae `id`) el backend la ignora a
+                    propósito: el stock se mueve por movimientos de inventario,
+                    no por guardar el formulario. Se muestra en solo lectura en
+                    vez de aceptar un número que nunca se aplicaba. */}
                 <input
                   type="number"
                   step="1"
                   min="0"
                   value={item.stock}
+                  readOnly={Boolean(item.id)}
+                  title={item.id ? 'Se ajusta desde Inventario, para que quede el movimiento' : undefined}
                   onChange={(e) => updateItem(idx, { stock: Number(e.target.value) || 0 })}
-                  className="w-full px-2 py-1.5 border border-border rounded-md text-[12px] bg-card outline-none focus:border-primary text-right"
+                  className={`w-full px-2 py-1.5 border border-border rounded-md text-[12px] outline-none focus:border-primary text-right ${
+                    item.id ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'bg-card'
+                  }`}
                 />
                 <input
                   type="number"
@@ -734,6 +743,17 @@ export function ProductFormModal({
   const showStock = productType === 'SIMPLE'
   const showRecipe = productType === 'RECIPE'
   const showCombo = productType === 'COMBO'
+
+  // El campo "Stock" es la existencia del producto "sin variante" (la default).
+  // En cuanto hay variantes con nombre deja de tener sentido: lo que se vende y
+  // se inventaría son ellas, y capturar aquí un número aparte creaba existencia
+  // fantasma que no pertenecía a ninguna opción comprable.
+  const hasNamedVariants = (form.variants?.length ?? 0) > 0
+  // Al editar, la existencia solo se mueve por el flujo de ajuste, que deja su
+  // InventoryMovement. El backend ya ignoraba este campo en el PATCH; ahora
+  // además lo rechaza, así que aquí se muestra en modo lectura en vez de
+  // ofrecer una edición que nunca se aplicaba.
+  const stockIsReadOnly = editingId !== null
 
   // Tipos de producto disponibles según la configuración del negocio:
   // - RECIPE: solo si la capacidad enableRecipes está activa (derivada del
@@ -1038,10 +1058,20 @@ export function ProductFormModal({
         )}
 
         {/* Stock — solo para SIMPLE. Es la existencia del producto "sin
-            variante"; las variantes con nombre llevan la suya abajo. */}
+            variante"; las variantes con nombre llevan la suya abajo, y en
+            cuanto existe una este campo desaparece: lo inventariable son ellas. */}
         {showStock && (
           <>
-            <FormField label="Stock" type="number" value={Number(form.stock).toString()} onChange={v => setForm(p => ({ ...p, stock: Number(v) || 0 }))} />
+            {!hasNamedVariants && (
+              <FormField
+                label="Stock"
+                type="number"
+                value={Number(form.stock).toString()}
+                onChange={v => setForm(p => ({ ...p, stock: Number(v) || 0 }))}
+                readOnly={stockIsReadOnly}
+                hint={stockIsReadOnly ? 'Se ajusta desde Inventario, para que quede el movimiento' : undefined}
+              />
+            )}
             <FormField label="Stock Mínimo" type="number" value={form.lowStockAlert.toString()} onChange={v => setForm(p => ({ ...p, lowStockAlert: Number(v) || 0 }))} />
             <div className="col-span-2 flex items-center gap-2 mb-3.5">
               <input type="checkbox" id="trackInv" checked={form.trackInventory} onChange={e => setForm(p => ({ ...p, trackInventory: e.target.checked }))} />

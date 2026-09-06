@@ -207,11 +207,25 @@ describe('InventoryConsumptionEngine — BranchInventory no negativo (P1-04)', (
     expect(productStock.p1).toBe(0);
   });
 
-  it('sin fila previa: la siembra desde el stock global y luego descuenta (no negativo)', async () => {
+  it('sin fila previa: la siembra en CERO, así que la venta no procede', async () => {
+    // Que no exista fila significa que en esta sucursal nunca hubo existencia de
+    // esta variante — no que tenga las 25 del espejo legacy, que es la suma de
+    // todas las variantes de todas las sucursales. Sembrar desde el global
+    // multiplicaba el inventario en cada combinación nueva (sucursal recién
+    // creada, variante recién añadida) y dejaba vender mercancía inexistente.
     const { tx, rows, calls } = makeTx({ p1: simple('p1', 25) }, {}, {});
-    await engine().consume(tx as never, [{ productId: 'p1', quantity: 2, itemType: 'PRODUCT' }], ctx('b1'));
-    expect(calls.branchCreate).toEqual([{ key: 'b1:v-p1', stock: 25 }]); // se siembra ANTES del delta
-    expect(rows.get('b1:v-p1')).toBe(23); // 25 - 2
+    await expect(
+      engine().consume(tx as never, [{ productId: 'p1', quantity: 2, itemType: 'PRODUCT' }], ctx('b1')),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(calls.branchCreate).toEqual([{ key: 'b1:v-p1', stock: 0 }]);
+    expect(rows.get('b1:v-p1')).toBe(0);
+  });
+
+  it('sin fila previa: una entrada (restore) la siembra en cero y suma encima', async () => {
+    const { tx, rows, calls } = makeTx({ p1: simple('p1', 25) }, {}, {});
+    await engine().restore(tx as never, [{ productId: 'p1', quantity: 4, itemType: 'PRODUCT' }], ctx('b1'));
+    expect(calls.branchCreate).toEqual([{ key: 'b1:v-p1', stock: 0 }]);
+    expect(rows.get('b1:v-p1')).toBe(4);
   });
 
   it('restore completo: reingresa al branch (venta normal round-trip simétrico)', async () => {

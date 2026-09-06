@@ -134,19 +134,27 @@ export class StoreService {
       const defaultVariant = variants.find((v) => v.isDefault);
       const own = defaultVariant ? rowByVariant.get(defaultVariant.id) : undefined;
 
+      // La variante default es un detalle interno (no tiene nombre): se omite
+      // para que la tienda no muestre una opción en blanco.
+      const namedVariants = variants
+        .filter((v) => !v.isDefault)
+        .map((v) => {
+          const row = rowByVariant.get(v.id);
+          return { id: v.id, name: v.name, price: row?.price ?? v.price, stock: row?.stock ?? 0 };
+        });
+
       return {
         ...rest,
         price: own?.price ?? rest.price,
         comparePrice: own?.comparePrice ?? rest.comparePrice,
-        stock: own?.stock ?? rest.stock,
-        // La variante default es un detalle interno (no tiene nombre): se omite
-        // para que la tienda no muestre una opción en blanco.
-        variants: variants
-          .filter((v) => !v.isDefault)
-          .map((v) => {
-            const row = rowByVariant.get(v.id);
-            return { id: v.id, name: v.name, price: row?.price ?? v.price, stock: row?.stock ?? 0 };
-          }),
+        // Con variantes con nombre, lo comprable son ELLAS: el `stock` del
+        // producto es su suma. Publicar el de la default —que no corresponde a
+        // ninguna opción del selector— anunciaba disponibilidad de un artículo
+        // que el cliente no puede escoger.
+        stock: namedVariants.length
+          ? namedVariants.reduce((total, v) => total + v.stock, 0)
+          : (own?.stock ?? rest.stock),
+        variants: namedVariants,
       };
     });
   }

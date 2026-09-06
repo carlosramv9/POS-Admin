@@ -57,6 +57,19 @@ export default function EditProductScreen() {
       taxRate: numToStr(product.taxRate),
       taxCode: (product.taxCode ?? 'IVA_16') as ProductFormValues['taxCode'],
       isEcommerce: product.isEcommerce,
+      // Ya vienen sin la default (`toDomain` la filtra) y con el precio, el
+      // costo y la existencia de la sucursal en contexto.
+      //
+      // El `?? []` no es paranoia: la caché de TanStack Query se rehidrata
+      // desde MMKV, así que un producto guardado por una versión anterior de la
+      // app llega sin `variants` por más que el tipo lo prometa.
+      variants: (product.variants ?? []).map((variant) => ({
+        id: variant.id,
+        name: variant.name,
+        cost: String(variant.cost),
+        price: String(variant.price),
+        stock: String(variant.stock),
+      })),
     };
   }, [product]);
 

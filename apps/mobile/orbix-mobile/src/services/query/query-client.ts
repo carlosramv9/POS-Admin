@@ -49,5 +49,6 @@ export const persistOptions = {
   persister: queryPersister,
   maxAge: ONE_DAY,
   /** Bump when a cached shape changes, to discard incompatible caches. */
-  buster: 'v1',
+  // v2: `Product` ganó `variants`; los productos cacheados por v1 no lo traen.
+  buster: 'v2',
 } as const;

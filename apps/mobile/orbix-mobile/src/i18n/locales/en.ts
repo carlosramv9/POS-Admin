@@ -115,6 +115,7 @@ export const en: TranslationSchema = {
     priceRequired: 'Enter a price.',
     priceInvalid: 'Enter a valid number (e.g. 149.90).',
     integerInvalid: 'Enter a whole number.',
+    variantNameRequired: 'Name this variant.',
   },
 
   wizard: {
@@ -393,7 +394,27 @@ export const en: TranslationSchema = {
     sectionPricing: 'Price & taxes',
     sectionCategory: 'Category',
     sectionInventory: 'Inventory',
+    sectionVariants: 'Variants',
     sectionVisibility: 'Status & visibility',
+    variants: {
+      add: 'Add variant',
+      name: 'Name',
+      namePlaceholder: 'e.g. Size M',
+      cost: 'Cost',
+      price: 'Price',
+      stock: 'Stock',
+      remove: 'Remove',
+      empty:
+        'No variants yet. Add one if this product sells in several presentations with their own stock, cost and price.',
+      branchScopeHint: 'Price, cost and stock belong to the active branch.',
+      noBranchHint:
+        'Your session has no active branch: you can only name variants. Pick a branch to set price, cost and stock.',
+      stockReadonlyHint: 'Stock is adjusted from Inventory.',
+      removeConfirmTitle: 'Remove this variant?',
+      removeConfirmDescription:
+        '"{{name}}" and its stock in every branch will be deleted. This cannot be undone.',
+      nonSimpleHint: 'This product type does not use variants.',
+    },
     serviceInventoryHint: 'Services don\'t track inventory directly. Only the sale is recorded.',
     nonSimpleInventoryHint: 'This product type doesn\'t carry its own stock.',
     image: {

@@ -9,7 +9,7 @@
 import type { TFunction } from 'i18next';
 import { z } from 'zod';
 
-import type { CreateProductRequest, UpdateProductRequest } from '@/dto/products.dto';
+import type { CreateProductRequest, ProductVariantInput, UpdateProductRequest } from '@/dto/products.dto';
 import { ProductStatus, ProductType, TaxCode } from '@/types/api';
 
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
@@ -40,6 +40,23 @@ export function buildProductSchema(t: TFunction) {
     taxRate: money(false),
     taxCode: z.enum([TaxCode.IVA_16, TaxCode.IVA_11, TaxCode.IVA_8, TaxCode.EXCENTO]),
     isEcommerce: z.boolean(),
+    /**
+     * Solo las variantes con nombre — la default es interna y nunca llega al
+     * formulario (`toDomain` la filtra).
+     *
+     * `id` es lo que distingue una variante existente de una nueva: sin él el
+     * servidor no puede sincronizar y guardar el producto se llevaría por
+     * delante las existencias de todas las sucursales.
+     */
+    variants: z.array(
+      z.object({
+        id: z.string().optional(),
+        name: z.string().trim().min(1, t('validation.variantNameRequired')).max(200),
+        cost: money(false),
+        price: money(false),
+        stock: integer(),
+      }),
+    ),
   });
 }
 
@@ -61,11 +78,36 @@ export const EMPTY_PRODUCT_FORM: ProductFormValues = {
   taxRate: '',
   taxCode: TaxCode.IVA_16,
   isEcommerce: false,
+  variants: [],
 };
 
 function num(value: string | undefined): number | undefined {
   if (!value || value.trim() === '') return undefined;
   return Number(value);
+}
+
+/**
+ * Variantes que viajan al servidor.
+ *
+ * Solo para SIMPLE: es el único tipo cuyo formulario muestra el editor, y
+ * mandar un arreglo vacío desde un COMBO borraría las variantes que el producto
+ * ya tuviera —con sus existencias en cascada— sin que nadie lo haya pedido.
+ * `undefined` deja intacto lo que haya en el servidor.
+ *
+ * El filtro por nombre es defensa: el schema ya lo exige, pero una fila recién
+ * agregada y nunca llenada no tiene por qué llegar a la API.
+ */
+function toVariantsRequest(values: ProductFormValues): ProductVariantInput[] | undefined {
+  if (values.type !== ProductType.SIMPLE) return undefined;
+  return values.variants
+    .filter((variant) => variant.name.trim() !== '')
+    .map((variant) => ({
+      id: variant.id,
+      name: variant.name.trim(),
+      cost: num(variant.cost) ?? 0,
+      price: num(variant.price) ?? 0,
+      stock: num(variant.stock) ?? 0,
+    }));
 }
 
 /** Every field but `sku`, shared by create and update. */
@@ -85,6 +127,7 @@ function toBaseRequest(values: ProductFormValues): Omit<CreateProductRequest, 's
     taxRate: num(values.taxRate),
     taxCode: values.taxCode,
     isEcommerce: values.isEcommerce,
+    variants: toVariantsRequest(values),
   };
 }
 
@@ -92,7 +135,15 @@ export function toCreateRequest(values: ProductFormValues): CreateProductRequest
   return { ...toBaseRequest(values), sku: values.sku.trim() };
 }
 
-/** sku is immutable after creation — the API has no field to receive it on PATCH. */
+/**
+ * sku is immutable after creation — the API has no field to receive it on PATCH.
+ *
+ * Neither does `stock`: the API rejects it. Writing it only moved the legacy
+ * mirror column on the product without touching the per-branch inventory that
+ * is actually read back, so the number appeared to change and nothing happened.
+ * Stock moves through `PATCH /products/:id/stock`, which records a movement.
+ */
 export function toUpdateRequest(values: ProductFormValues): UpdateProductRequest {
-  return toBaseRequest(values);
+  const { stock: _stock, ...rest } = toBaseRequest(values);
+  return rest;
 }

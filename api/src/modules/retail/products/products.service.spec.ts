@@ -7,6 +7,7 @@ import { AuditService } from '../../../common/services/audit.service';
 import { R2Service } from '../../../storage/r2.service';
 import { BusinessConfigurationService } from '../../../common/business-config/business-configuration.service';
 import { InventoryEngine } from '../inventory/inventory.engine';
+import { VariantInventoryResolver } from '../inventory/variant-inventory.resolver';
 import { SlugUtil } from '../../../common/utils/slug.util';
 import { AiUsageRecorder } from '../../../ai/usage/ai-usage.recorder';
 
@@ -90,6 +91,10 @@ describe('ProductsService', () => {
         { provide: R2Service, useValue: mockR2Service },
         { provide: BusinessConfigurationService, useValue: mockBusinessConfig },
         { provide: InventoryEngine, useValue: mockInventoryEngine },
+        {
+          provide: VariantInventoryResolver,
+          useValue: { resolveBranchId: jest.fn().mockResolvedValue(null) },
+        },
         { provide: AiUsageRecorder, useValue: mockAiUsageRecorder },
       ],
     }).compile();

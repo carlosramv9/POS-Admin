@@ -17,7 +17,7 @@
  *   current step's fields before advancing via "Continuar", Guardar only
  *   appears on the last step. A blank record benefits from being walked
  *   through in order.
- * - Edit (`isEditing` true): free — a row of numbered, tappable dots jumps
+ * - Edit (`isEditing` true): free — a row of labelled, tappable tabs jumps
  *   straight to any step (1→4 in one tap), no per-step validation gate, and
  *   Guardar is available from every step. An existing record is already
  *   complete; forcing a full replay of the wizard to fix one field would be
@@ -25,10 +25,10 @@
  *   submit either way (`zodResolver`), so this can't save invalid data.
  */
 import { useMemo, useState } from 'react';
-import { useForm, useWatch, type FieldPath } from 'react-hook-form';
+import { useFieldArray, useForm, useWatch, type Control, type FieldPath, type UseFormGetValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
-import { Pressable, Switch, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import {
   BackButton,
@@ -43,8 +43,10 @@ import {
   OrbixTextField,
   type SelectOption,
 } from '@/components';
-import { PlusIcon } from '@/components/ui/icons';
+import { PlusIcon, TrashIcon } from '@/components/ui/icons';
+import { OrbixGradient } from '@/components/ui/orbix-gradient';
 import { useCreateCategory } from '@/features/products/use-product-mutations';
+import { useAuth } from '@/hooks/use-auth';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useTheme } from '@/hooks/use-theme';
 import { ProductStatus, ProductType, TaxCode } from '@/types/api';
@@ -67,56 +69,95 @@ export interface ProductFormProps {
 }
 
 /**
- * Numbered, tappable step dots — the free-navigation header used only in
- * edit mode. The dot itself is drawn small (28px) to stay visually light,
- * but the actual touch target is padded out to the ~44dp minimum via
- * `hitSlop` — at 28px raw, adjacent dots are close enough that a real
- * fingertip reliably lands on the wrong one.
+ * Labelled, tappable step tabs — the free-navigation header used only in edit
+ * mode. Each tab carries its section name instead of a bare number, so the
+ * whole record's shape is readable at a glance and jumping to "Precios" no
+ * longer means remembering that it is step 2.
+ *
+ * The label makes the separate step title underneath redundant, so it is not
+ * rendered in edit mode.
+ *
+ * Drawn as a segmented control: one `muted` track holds the whole set, and the
+ * selected step is a raised pill carrying the brand gradient — the same
+ * `primary` gradient the buttons and `OrbixStepper` use, so edit mode reads as
+ * the same wizard as create mode rather than a different control. Grouping them
+ * on a shared track is what makes them read as one switch between sections
+ * instead of five loose buttons.
+ *
+ * Padding (not `hitSlop`) is what makes the target: the 44dp floor clears the
+ * touch guideline on its own, and unlike `hitSlop` the padded area is visible,
+ * so adjacent tabs read as separate targets. They scroll horizontally because
+ * five labels never fit across a phone.
  */
-function StepDots({
-  total,
+function StepTabs({
+  steps,
   current,
   onSelect,
 }: {
-  total: number
+  steps: readonly { id: StepId; label: string }[]
   current: number
   onSelect: (index: number) => void
 }) {
   const theme = useTheme();
-  const dotSize = 28;
-  const hitSlop = 8; // (28 + 8*2) = 44dp effective target — the touch guideline minimum
   return (
-    <View style={{ flexDirection: 'row', gap: theme.spacing.md }}>
-      {Array.from({ length: total }, (_, index) => {
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      // The track lives in the content container, not in a wrapper View: that
+      // way it grows with the tabs and stays painted under them while scrolling,
+      // instead of clipping to one screen width.
+      contentContainerStyle={{
+        flexDirection: 'row',
+        gap: theme.spacing.xs,
+        backgroundColor: theme.colors.muted,
+        borderRadius: theme.radius.full,
+        padding: theme.spacing.xs,
+      }}
+      accessibilityRole="tablist"
+    >
+      {steps.map((step, index) => {
         const active = index === current;
         return (
           <Pressable
-            key={index}
+            key={step.id}
             onPress={() => onSelect(index)}
-            hitSlop={hitSlop}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            accessibilityLabel={String(index + 1)}
+            accessibilityLabel={step.label}
             style={({ pressed }) => ({
-              width: dotSize,
-              height: dotSize,
               borderRadius: theme.radius.full,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: active ? theme.colors.primary : theme.colors.card,
-              borderWidth: 1,
-              borderColor: active ? theme.colors.primary : theme.colors.border,
-              opacity: pressed ? 0.6 : 1,
-              transform: [{ scale: pressed ? 0.9 : 1 }],
+              // Clips the gradient to the pill; without it the corners square off.
+              overflow: 'hidden',
+              opacity: pressed ? 0.7 : 1,
+              ...(active ? theme.shadows.sm : null),
             })}
           >
-            <OrbixText size="xs" weight="semibold" style={{ color: active ? theme.colors.primaryForeground : theme.colors.mutedForeground }}>
-              {index + 1}
-            </OrbixText>
+            {active ? <OrbixGradient variant="primary" style={[StyleSheet.absoluteFill, { borderRadius: theme.radius.full }]} /> : null}
+            <View
+              style={{
+                minHeight: 44,
+                paddingVertical: theme.spacing.sm,
+                paddingHorizontal: theme.spacing.lg,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <OrbixText
+                size="md"
+                weight={active ? 'semibold' : 'medium'}
+                numberOfLines={1}
+                style={{ 
+                  color: active ? theme.colors.primaryForeground : theme.colors.mutedForeground ,
+                  borderRadius: theme.radius.full,
+                }}
+              >
+                {step.label}
+              </OrbixText>
+            </View>
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -140,9 +181,181 @@ function SwitchRow({ label, hint, value, onValueChange }: { label: string; hint?
   );
 }
 
+/**
+ * Editor de las variantes con nombre del producto: "Talla M", "Extra queso".
+ *
+ * La variante **default** nunca aparece aquí. Es la línea interna "el producto
+ * en sí" —la que lleva el stock de los productos que nunca se dividieron en
+ * presentaciones— y el repositorio la filtra al mapear, igual que el web.
+ *
+ * Precio, costo y existencia son **de la sucursal activa**: viven en
+ * `branch_inventory` por (sucursal, variante), así que no existe "el precio de
+ * la variante" sino el de cada sucursal. Sin sucursal en la sesión el servidor
+ * no tiene dónde escribirlos, y esos tres campos se deshabilitan en vez de
+ * fingir que se guardan.
+ *
+ * Tarjetas apiladas, no una retícula como en el web: cuatro columnas de inputs
+ * no caben a lo ancho de un teléfono sin volverse intocables.
+ *
+ * `keyName: 'key'` es obligatorio: por defecto `useFieldArray` llama `id` a su
+ * clave de render y pisaría el `id` real de la variante — el único dato con el
+ * que el servidor distingue una variante existente de una nueva.
+ */
+function VariantsEditor({
+  control,
+  getValues,
+  branchScoped,
+}: {
+  control: Control<ProductFormValues>
+  getValues: UseFormGetValues<ProductFormValues>
+  branchScoped: boolean
+}) {
+  const theme = useTheme();
+  const { t } = useTranslation();
+  const { fields, append, remove } = useFieldArray({ control, name: 'variants', keyName: 'key' });
+  // Índice pendiente de confirmación: solo para las que ya existen en el
+  // servidor, donde quitarlas se lleva su existencia en todas las sucursales.
+  const [pendingRemoval, setPendingRemoval] = useState<number | null>(null);
+
+  const requestRemove = (index: number, persisted: boolean) => {
+    if (persisted) setPendingRemoval(index);
+    else remove(index);
+  };
+
+  return (
+    <View style={{ gap: theme.spacing.md }}>
+      <OrbixText size="xs" tone="mutedForeground">
+        {t(branchScoped ? 'products.variants.branchScopeHint' : 'products.variants.noBranchHint')}
+      </OrbixText>
+
+      {fields.length === 0 ? (
+        <View
+          style={{
+            padding: theme.spacing.lg,
+            borderRadius: theme.radius.lg,
+            borderWidth: 1,
+            borderStyle: 'dashed',
+            borderColor: theme.colors.border,
+          }}
+        >
+          <OrbixText size="xs" tone="mutedForeground" style={{ textAlign: 'center' }}>
+            {t('products.variants.empty')}
+          </OrbixText>
+        </View>
+      ) : null}
+
+      {fields.map((field, index) => {
+        // `field.id` es el de la variante en el servidor (ver `keyName`): solo
+        // las nuevas lo traen vacío, y solo en ellas tiene sentido capturar una
+        // existencia inicial — en las existentes el servidor la ignora, porque
+        // el stock se mueve por movimientos de inventario.
+        const persisted = Boolean(field.id);
+        return (
+          <View
+            key={field.key}
+            style={{
+              gap: theme.spacing.sm + 2,
+              padding: theme.spacing.md,
+              borderRadius: theme.radius.lg,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.card,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: theme.spacing.sm + 2 }}>
+              <View style={{ flex: 1 }}>
+                <OrbixTextField
+                  control={control}
+                  name={`variants.${index}.name`}
+                  label={t('products.variants.name')}
+                  placeholder={t('products.variants.namePlaceholder')}
+                  autoCapitalize="sentences"
+                />
+              </View>
+              <Pressable
+                onPress={() => requestRemove(index, persisted)}
+                accessibilityRole="button"
+                accessibilityLabel={t('products.variants.remove')}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: theme.radius.lg,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.dangerBg,
+                }}
+              >
+                <TrashIcon size={16} color={theme.colors.dangerFg} />
+              </Pressable>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: theme.spacing.sm + 2 }}>
+              <View style={{ flex: 1 }}>
+                <OrbixTextField
+                  control={control}
+                  name={`variants.${index}.cost`}
+                  label={t('products.variants.cost')}
+                  keyboardType="decimal-pad"
+                  editable={branchScoped}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <OrbixTextField
+                  control={control}
+                  name={`variants.${index}.price`}
+                  label={t('products.variants.price')}
+                  keyboardType="decimal-pad"
+                  editable={branchScoped}
+                />
+              </View>
+            </View>
+
+            <View style={{ width: '50%' }}>
+              <OrbixTextField
+                control={control}
+                name={`variants.${index}.stock`}
+                label={t('products.variants.stock')}
+                keyboardType="number-pad"
+                editable={branchScoped && !persisted}
+              />
+            </View>
+            {persisted ? (
+              <OrbixText size="xs" tone="mutedForeground">
+                {t('products.variants.stockReadonlyHint')}
+              </OrbixText>
+            ) : null}
+          </View>
+        );
+      })}
+
+      <OrbixButton
+        label={t('products.variants.add')}
+        variant="secondary"
+        onPress={() => append({ name: '', cost: '', price: '', stock: '0' })}
+      />
+
+      <OrbixModal
+        visible={pendingRemoval !== null}
+        title={t('products.variants.removeConfirmTitle')}
+        description={t('products.variants.removeConfirmDescription', {
+          name: pendingRemoval === null ? '' : getValues(`variants.${pendingRemoval}.name`),
+        })}
+        confirmLabel={t('products.variants.remove')}
+        cancelLabel={t('common.cancel')}
+        destructive
+        onConfirm={() => {
+          if (pendingRemoval !== null) remove(pendingRemoval);
+          setPendingRemoval(null);
+        }}
+        onDismiss={() => setPendingRemoval(null)}
+      />
+    </View>
+  );
+}
+
 // One step per `products.section*` label already in the locale files —
 // see the file-level comment for why the split lands here.
-const STEP_IDS = ['general', 'pricing', 'category', 'inventory', 'visibility'] as const;
+const STEP_IDS = ['general', 'pricing', 'category', 'inventory', 'variants', 'visibility'] as const;
 type StepId = (typeof STEP_IDS)[number];
 
 /** Fields validated before leaving a step — keeps `trigger()` scoped per step. */
@@ -151,15 +364,17 @@ const STEP_FIELDS: Record<StepId, FieldPath<ProductFormValues>[]> = {
   pricing: ['price', 'comparePrice', 'costPrice', 'taxRate', 'taxCode'],
   category: ['categoryId'],
   inventory: ['trackInventory', 'stock', 'lowStockAlert'],
+  variants: ['variants'],
   visibility: ['status', 'isEcommerce'],
 };
 
 /** `products.section*` — same labels the fields used to sit under in one long scroll. */
-const STEP_TITLE_KEYS: Record<StepId, 'products.sectionGeneral' | 'products.sectionPricing' | 'products.sectionCategory' | 'products.sectionInventory' | 'products.sectionVisibility'> = {
+const STEP_TITLE_KEYS: Record<StepId, 'products.sectionGeneral' | 'products.sectionPricing' | 'products.sectionCategory' | 'products.sectionInventory' | 'products.sectionVariants' | 'products.sectionVisibility'> = {
   general: 'products.sectionGeneral',
   pricing: 'products.sectionPricing',
   category: 'products.sectionCategory',
   inventory: 'products.sectionInventory',
+  variants: 'products.sectionVariants',
   visibility: 'products.sectionVisibility',
 };
 
@@ -177,13 +392,17 @@ export function ProductForm({
   const theme = useTheme();
   const { t } = useTranslation();
   const { can } = usePermissions();
+  const { session } = useAuth();
+  // Precio, costo y existencia de una variante pertenecen a una sucursal. Sin
+  // ninguna activa no hay dónde escribirlos — ver `VariantsEditor`.
+  const branchScoped = Boolean(session?.branchId);
 
   const [newCategoryVisible, setNewCategoryVisible] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const createCategory = useCreateCategory();
 
   const schema = useMemo(() => buildProductSchema(t), [t]);
-  const { control, handleSubmit, setValue, trigger } = useForm<ProductFormValues>({
+  const { control, handleSubmit, getValues, setValue, trigger } = useForm<ProductFormValues>({
     resolver: zodResolver(schema),
     defaultValues,
     mode: 'onBlur',
@@ -193,6 +412,13 @@ export function ProductForm({
   const type = useWatch({ control, name: 'type' });
   const trackInventory = useWatch({ control, name: 'trackInventory' });
   const isEcommerce = useWatch({ control, name: 'isEcommerce' });
+  // `stock` es la existencia del producto "sin variante" (la default). En cuanto
+  // hay variantes con nombre deja de tener sentido: lo inventariable son ellas,
+  // y capturar aquí un número aparte creaba existencia que no pertenecía a
+  // ninguna opción vendible. En edición tampoco se muestra: el servidor rechaza
+  // el campo en el PATCH y la existencia se mueve por ajustes de inventario.
+  const namedVariants = useWatch({ control, name: 'variants' });
+  const showProductStock = !isEditing && (namedVariants?.length ?? 0) === 0;
   const isSimple = type === ProductType.SIMPLE;
 
   const [stepIndex, setStepIndex] = useState(0);
@@ -228,6 +454,12 @@ export function ProductForm({
     [t],
   );
 
+  /** Only read in edit mode, where the tabs replace the step title. */
+  const stepTabs = useMemo(
+    () => STEP_IDS.map((id) => ({ id, label: t(STEP_TITLE_KEYS[id]) })),
+    [t],
+  );
+
   const taxCodeOptions = useMemo<SelectOption[]>(
     () => Object.values(TaxCode).map((value) => ({ value, label: t(`products.taxCode.${value}`) })),
     [t],
@@ -257,12 +489,7 @@ export function ProductForm({
     <View style={{ gap: theme.spacing.xl }}>
       <View style={{ gap: theme.spacing.lg }}>
         {isEditing ? (
-          <>
-            <StepDots total={STEP_IDS.length} current={stepIndex} onSelect={jumpToStep} />
-            <OrbixText size="sm" weight="semibold" tone="mutedForeground">
-              {t(STEP_TITLE_KEYS[stepId])}
-            </OrbixText>
-          </>
+          <StepTabs steps={stepTabs} current={stepIndex} onSelect={jumpToStep} />
         ) : (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md }}>
@@ -380,9 +607,11 @@ export function ProductForm({
               />
               {trackInventory ? (
                 <View style={{ flexDirection: 'row', gap: theme.spacing.sm + 2 }}>
-                  <View style={{ flex: 1 }}>
-                    <OrbixTextField control={control} name="stock" label={t('products.fields.stock')} keyboardType="number-pad" />
-                  </View>
+                  {showProductStock ? (
+                    <View style={{ flex: 1 }}>
+                      <OrbixTextField control={control} name="stock" label={t('products.fields.stock')} keyboardType="number-pad" />
+                    </View>
+                  ) : null}
                   <View style={{ flex: 1 }}>
                     <OrbixTextField control={control} name="lowStockAlert" label={t('products.fields.lowStockAlert')} keyboardType="number-pad" />
                   </View>
@@ -399,6 +628,26 @@ export function ProductForm({
             >
               <OrbixText size="xs" tone="mutedForeground">
                 {t(type === ProductType.SERVICE ? 'products.serviceInventoryHint' : 'products.nonSimpleInventoryHint')}
+              </OrbixText>
+            </View>
+          )}
+        </FieldGroup>
+      ) : null}
+
+      {stepId === 'variants' ? (
+        <FieldGroup>
+          {isSimple ? (
+            <VariantsEditor control={control} getValues={getValues} branchScoped={branchScoped} />
+          ) : (
+            <View
+              style={{
+                padding: theme.spacing.md,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.muted,
+              }}
+            >
+              <OrbixText size="xs" tone="mutedForeground">
+                {t('products.variants.nonSimpleHint')}
               </OrbixText>
             </View>
           )}

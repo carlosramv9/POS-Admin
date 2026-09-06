@@ -37,6 +37,7 @@ function build(prev: number) {
     { upload: jest.fn(), delete: jest.fn(), buildKey: () => 'k' } as never,
     { hasFeature: jest.fn().mockResolvedValue(false) } as never,
     engine as never,
+    { resolveBranchId: jest.fn().mockResolvedValue(null) } as never,
     { recordOutcome: jest.fn().mockResolvedValue(undefined) } as never,
   );
 

@@ -5,6 +5,7 @@ import type {
   PaginatedDto,
   ProductDto,
   ProductImageDto,
+  ProductVariantDto,
   UpdateProductRequest,
 } from '@/dto/products.dto';
 import { http } from '@/services/api';
@@ -23,6 +24,22 @@ export interface ImageAsset {
   uri: string;
   fileName?: string | null;
   mimeType?: string | null;
+}
+
+/**
+ * Variante con nombre del producto. Precio, costo y existencia son los de la
+ * **sucursal en contexto** — ver `ProductVariantDto`.
+ *
+ * La variante default (`isDefault`) no llega hasta aquí: `toDomain` la filtra,
+ * porque es la línea interna "el producto en sí" y la UI no la trata como una
+ * presentación más.
+ */
+export interface ProductVariant {
+  id: string;
+  name: string;
+  cost: number;
+  price: number;
+  stock: number;
 }
 
 export interface Product {
@@ -52,6 +69,8 @@ export interface Product {
    * `null` cuando el producto no tiene ninguna: quien la use pinta su marcador.
    */
   primaryImage: ProductImage | null;
+  /** Solo las que tienen nombre; vacío si el producto nunca se dividió. */
+  variants: ProductVariant[];
   createdAt: string;
 }
 
@@ -95,6 +114,16 @@ export function resolvePrimaryImage(images: ProductImage[]): ProductImage | null
   return images.find((image) => image.isPrimary) ?? images[0] ?? null;
 }
 
+function toVariant(dto: ProductVariantDto): ProductVariant {
+  return {
+    id: dto.id,
+    name: dto.name ?? '',
+    cost: toNumber(dto.cost) ?? 0,
+    price: toNumber(dto.price) ?? 0,
+    stock: dto.stock,
+  };
+}
+
 function toDomain(dto: ProductDto): Product {
   const images = (dto.images ?? []).map(toImage);
   return {
@@ -118,6 +147,8 @@ function toDomain(dto: ProductDto): Product {
     isEcommerce: dto.isEcommerce,
     images,
     primaryImage: resolvePrimaryImage(images),
+    // La default se descarta: es interna y la UI nunca la edita ni la reenvía.
+    variants: (dto.variants ?? []).filter((variant) => !variant.isDefault).map(toVariant),
     createdAt: dto.createdAt,
   };
 }

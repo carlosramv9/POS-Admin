@@ -7,6 +7,7 @@ import { AuditService } from '../../../common/services/audit.service';
 import { R2Service } from '../../../storage/r2.service';
 import { BusinessConfigurationService } from '../../../common/business-config/business-configuration.service';
 import { InventoryEngine } from '../inventory/inventory.engine';
+import { VariantInventoryResolver } from '../inventory/variant-inventory.resolver';
 import { AiUsageRecorder } from '../../../ai/usage/ai-usage.recorder';
 
 // BR-02: recipes are gated behind the `enableRecipes` feature. SIMPLE/SERVICE/
@@ -24,7 +25,12 @@ describe('ProductsService — BR-02 recipe gating', () => {
     category: { findFirst: jest.fn() },
     $transaction: jest.fn().mockResolvedValue(createdProduct),
   };
-  const mockTenantContext = { requireTenantId: jest.fn().mockReturnValue('tenant-1') };
+  const mockTenantContext = {
+    requireTenantId: jest.fn().mockReturnValue('tenant-1'),
+    // El alta consulta la sucursal en contexto para sembrar precio/costo de las
+    // variantes: sin sucursal, todas nacen con los valores del producto.
+    getBranchId: jest.fn().mockReturnValue(undefined),
+  };
   const mockAudit = { log: jest.fn() };
   const mockR2 = { upload: jest.fn(), delete: jest.fn(), buildKey: jest.fn() };
   const mockBusinessConfig = { hasFeature: jest.fn() };
@@ -49,6 +55,10 @@ describe('ProductsService — BR-02 recipe gating', () => {
         { provide: R2Service, useValue: mockR2 },
         { provide: BusinessConfigurationService, useValue: mockBusinessConfig },
         { provide: InventoryEngine, useValue: mockInventoryEngine },
+        {
+          provide: VariantInventoryResolver,
+          useValue: { resolveBranchId: jest.fn().mockResolvedValue(null) },
+        },
         { provide: AiUsageRecorder, useValue: mockAiUsageRecorder },
       ],
     }).compile();

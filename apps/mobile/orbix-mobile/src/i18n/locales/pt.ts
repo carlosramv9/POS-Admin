@@ -115,6 +115,7 @@ export const pt: TranslationSchema = {
     priceRequired: 'Digite um preço.',
     priceInvalid: 'Digite um número válido (ex. 149.90).',
     integerInvalid: 'Digite um número inteiro.',
+    variantNameRequired: 'Dê um nome à variação.',
   },
 
   wizard: {
@@ -393,7 +394,27 @@ export const pt: TranslationSchema = {
     sectionPricing: 'Preço e impostos',
     sectionCategory: 'Categoria',
     sectionInventory: 'Estoque',
+    sectionVariants: 'Variações',
     sectionVisibility: 'Status e visibilidade',
+    variants: {
+      add: 'Adicionar variação',
+      name: 'Nome',
+      namePlaceholder: 'Ex. Tamanho M',
+      cost: 'Custo',
+      price: 'Preço',
+      stock: 'Estoque',
+      remove: 'Remover',
+      empty:
+        'Sem variações. Adicione uma se este produto é vendido em várias apresentações com estoque, custo e preço próprios.',
+      branchScopeHint: 'O preço, o custo e o estoque são os da filial ativa.',
+      noBranchHint:
+        'Sua sessão não tem filial ativa: você só pode nomear variações. Escolha uma filial para informar preço, custo e estoque.',
+      stockReadonlyHint: 'O estoque é ajustado no Estoque.',
+      removeConfirmTitle: 'Remover a variação?',
+      removeConfirmDescription:
+        '"{{name}}" será excluída junto com seu estoque em todas as filiais. Esta ação não pode ser desfeita.',
+      nonSimpleHint: 'Este tipo de produto não usa variações.',
+    },
     serviceInventoryHint: 'Serviços não controlam estoque diretamente. Apenas a venda é registrada.',
     nonSimpleInventoryHint: 'Este tipo de produto não tem estoque próprio.',
     image: {

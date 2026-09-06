@@ -13,6 +13,7 @@ import { TenantContextService } from '../../../common/context/tenant-context.ser
 import { AuditService } from '../../../common/services/audit.service';
 import { BusinessConfigurationService } from '../../../common/business-config/business-configuration.service';
 import { InventoryEngine } from '../inventory/inventory.engine';
+import { VariantInventoryResolver } from '../inventory/variant-inventory.resolver';
 import { R2Service } from '../../../storage/r2.service';
 import { SlugUtil } from '../../../common/utils/slug.util';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -49,6 +50,22 @@ const PRODUCT_INCLUDE = {
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof PRODUCT_INCLUDE }>;
 
+/**
+ * Valores comerciales de una variante para UNA sucursal — la del contexto.
+ *
+ * Precio, costo y existencia de una variante viven en `branch_inventory` por
+ * (sucursal, variante), así que no existe "el precio de la variante": existe el
+ * de cada sucursal. Editar uno jamás toca el de otra sucursal, y menos el de
+ * otro tenant. `branchId` null (token sin sucursal asignada) significa que no
+ * hay ninguna a la que aplicar los valores capturados.
+ */
+interface VariantBranchValues {
+  branchId: string | null;
+  stock?: number;
+  price?: number;
+  cost?: number;
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -64,6 +81,10 @@ export class ProductsService {
     // motor de inventario de bajo nivel. Las validaciones de negocio (tipo
     // SIMPLE, trackInventory, guard de stock) permanecen en este servicio.
     private inventoryEngine: InventoryEngine,
+    // Resuelve la sucursal contra la que se carga una existencia cuando el token
+    // no trae una (la `isMain` del tenant). La existencia inicial de una variante
+    // pertenece a UNA sucursal, nunca a todas — ver `seedBranchInventory`.
+    private variantResolver: VariantInventoryResolver,
     // Fase 3 (AI Product Assistant): registra el desenlace de un draft de IA
     // cuando el producto que se crea vino de uno — ver `aiRequestId` en el DTO.
     // Nunca decide qué se crea, y su fallo nunca debe tumbar la creación.
@@ -211,11 +232,22 @@ export class ProductsService {
       productData.stock = 0;
     }
 
+    // Precio, costo y existencia de una variante son SIEMPRE de una sucursal
+    // concreta: la del contexto (derivada del token, nunca del body). Las demás
+    // sucursales reciben su fila —o la variante sería invendible ahí— pero con
+    // los valores del producto, nunca con los capturados aquí.
+    const branchId = this.tenantContext.getBranchId() ?? null;
+
     const product = await this.prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
         data: { ...productData, type, tenantId, slug },
         include: PRODUCT_INCLUDE,
       });
+
+      // Sucursal a la que pertenecen las existencias capturadas en el alta: la
+      // del contexto y, con un token sin sucursal, la `isMain` del tenant. Es
+      // UNA, nunca todas: el stock inicial no se replica (ver seedBranchInventory).
+      const stockBranchId = await this.variantResolver.resolveBranchId(tx, tenantId, branchId);
 
       // Toda alta necesita su variante default — la línea implícita "el producto
       // en sí", que es la que lleva el inventario — y una fila de existencias por
@@ -231,9 +263,10 @@ export class ProductsService {
         },
         select: { id: true },
       });
-      await this.seedBranchInventory(tx, tenantId, created, [defaultVariant.id]);
-
-      let needsRefetch = true;
+      await this.seedBranchInventory(tx, tenantId, created, [defaultVariant.id], {
+        branchId: stockBranchId,
+        stock: created.stock,
+      });
 
       if (type === 'RECIPE' && recipeItems?.length) {
         await this.assertSuppliesInTenant(tx, tenantId, recipeItems.map((i) => i.supplyId));
@@ -252,7 +285,6 @@ export class ProductsService {
             items: { create: normalizedItems },
           },
         });
-        needsRefetch = true;
       }
 
       if (type === 'COMBO' && comboItems?.length) {
@@ -264,31 +296,35 @@ export class ProductsService {
             quantity: ci.quantity ?? 1,
           })),
         });
-        needsRefetch = true;
       }
 
       if (variants?.length) {
-        await tx.productVariant.createMany({
-          data: variants.map((v) => ({
-            productId: created.id,
-            name: v.name,
-            cost: v.cost ?? 0,
-            price: v.price ?? 0,
-          })),
-        });
-        // Las variantes con nombre también necesitan existencias propias por
-        // sucursal, o quedarían sin precio ni stock donde se vendan.
-        const named = await tx.productVariant.findMany({
-          where: { productId: created.id, isDefault: false },
-          select: { id: true },
-        });
-        await this.seedBranchInventory(
-          tx,
-          tenantId,
-          created,
-          named.map((v) => v.id),
-          0,
-        );
+        // Una a una, no `createMany`: cada variante siembra sus existencias con
+        // SUS valores, y `createMany` no devuelve ids — releerlas después
+        // perdería la correspondencia con la fila del DTO de la que salieron.
+        for (const variant of variants) {
+          const createdVariant = await tx.productVariant.create({
+            data: {
+              productId: created.id,
+              name: variant.name,
+              // Misma política de inventario que la default: `trackInventory` es
+              // del producto, no de la variante. Sin esto una variante de un
+              // RECIPE/COMBO/SERVICE nacía rastreando stock que ese tipo no lleva.
+              trackInventory: created.trackInventory,
+              cost: variant.cost ?? 0,
+              price: variant.price ?? 0,
+            },
+            select: { id: true },
+          });
+          // Las variantes con nombre también necesitan existencias propias por
+          // sucursal, o quedarían sin precio ni stock donde se vendan.
+          await this.seedBranchInventory(tx, tenantId, created, [createdVariant.id], {
+            branchId: stockBranchId,
+            stock: variant.stock ?? 0,
+            price: variant.price,
+            cost: variant.cost,
+          });
+        }
       }
 
       if (features?.length) {
@@ -299,12 +335,14 @@ export class ProductsService {
             value: f.value,
           })),
         });
-        needsRefetch = true;
       }
 
-      return needsRefetch
-        ? (tx.product.findUnique({ where: { id: created.id }, include: PRODUCT_INCLUDE }) as Promise<Product>)
-        : created;
+      // Siempre se relee: la variante default y sus filas de existencias se
+      // crean después del `create`, así que `created` nunca las trae.
+      return tx.product.findUnique({
+        where: { id: created.id },
+        include: PRODUCT_INCLUDE,
+      }) as Promise<Product>;
     });
 
     if (aiRequestId) {
@@ -369,9 +407,18 @@ export class ProductsService {
 
   /**
    * Crea la fila de existencias de cada variante en todas las sucursales activas
-   * del tenant, copiando los valores comerciales del producto. `stockOverride`
-   * permite arrancar en 0 las variantes con nombre: el stock capturado en el alta
-   * pertenece a la variante default, no se replica en cada una.
+   * del tenant, copiando los valores comerciales del producto.
+   *
+   * Los valores capturados (`overrides`) pertenecen a UNA sola sucursal: la que
+   * indica `overrides.branchId`. Esa fila recibe el precio, el costo y la
+   * existencia capturados; las del resto de sucursales se crean —para que la
+   * variante sea vendible ahí— con los valores del producto y existencia 0.
+   *
+   * La existencia NUNCA se replica. Antes, sembrar la variante default sin
+   * `overrides` copiaba `product.stock` en todas las sucursales activas, de modo
+   * que un alta con 10 unidades en un tenant de tres sucursales nacía con 30.
+   * Unas existencias iniciales son de la sucursal donde se dieron de alta; el
+   * resto arranca en cero y se surte con una transferencia o una compra.
    *
    * `skipDuplicates` la hace idempotente, de modo que volver a sembrar una
    * variante existente no rompe.
@@ -381,7 +428,7 @@ export class ProductsService {
     tenantId: string,
     product: Product,
     variantIds: string[],
-    stockOverride?: number,
+    overrides: VariantBranchValues,
   ): Promise<void> {
     if (variantIds.length === 0) return;
 
@@ -392,20 +439,25 @@ export class ProductsService {
     if (branches.length === 0) return;
 
     await tx.branchInventory.createMany({
-      data: branches.flatMap((branch) =>
-        variantIds.map((variantId) => ({
+      data: branches.flatMap((branch) => {
+        // Solo la sucursal destino ve los valores capturados. Sin sucursal
+        // destino (`branchId` null) ninguna lo es, y la variante nace con los
+        // valores del producto y existencia 0 en todas — nunca con el precio ni
+        // con las existencias de otra.
+        const scoped = overrides.branchId === branch.id;
+        return variantIds.map((variantId) => ({
           branchId: branch.id,
           productId: product.id,
           variantId,
-          stock: stockOverride ?? product.stock,
-          cost: product.costPrice,
-          price: product.price,
+          stock: scoped ? (overrides.stock ?? 0) : 0,
+          cost: scoped && overrides.cost !== undefined ? overrides.cost : product.costPrice,
+          price: scoped && overrides.price !== undefined ? overrides.price : product.price,
           comparePrice: product.comparePrice,
           lastCost: product.lastCost,
           avgCost: product.avgCost,
           lowStockAlert: product.lowStockAlert,
-        })),
-      ),
+        }));
+      }),
       skipDuplicates: true,
     });
   }
@@ -563,6 +615,15 @@ export class ProductsService {
       // sucursales cada vez que alguien guarda el producto. Se conserva la
       // variante default (nunca llega en el DTO — es interna) y las que traen id.
       if (variants !== undefined) {
+        // Igual que en el alta: los valores capturados son de la sucursal en
+        // contexto, que sale del token — nunca del body.
+        const branchId = this.tenantContext.getBranchId() ?? null;
+        // Sucursal que recibe la existencia inicial de una variante NUEVA. Con un
+        // token sin sucursal se usa la `isMain`: la existencia capturada tiene que
+        // aterrizar en algún sitio o se pierde en silencio. El precio de una
+        // variante YA existente sigue exigiendo sucursal explícita (más abajo):
+        // ahí no hay nada que perder y adivinar propagaría un precio a ciegas.
+        const stockBranchId = await this.variantResolver.resolveBranchId(tx, tenantId, branchId);
         const existing = await tx.productVariant.findMany({
           where: { productId: id },
           select: { id: true, isDefault: true },
@@ -578,18 +639,48 @@ export class ProductsService {
               where: { id: variant.id },
               data: { name: variant.name, cost: variant.cost ?? 0, price: variant.price ?? 0 },
             });
+            // Los valores efectivos son los de `branch_inventory`: sin esto,
+            // cambiar el precio de una variante existente no se vería en
+            // ninguna venta. El `where` acota a la sucursal en contexto — un
+            // `updateMany` sin `branchId` pondría el precio de esta sucursal en
+            // todas las demás. Sin sucursal en contexto no se escribe nada:
+            // renombrar sigue funcionando, el precio no se propaga a ciegas.
+            //
+            // `stock` no se toca aquí a propósito: la existencia se mueve por
+            // movimientos de inventario, no por guardar el formulario.
+            const branchValues: Prisma.BranchInventoryUpdateManyMutationInput = {
+              ...(variant.cost !== undefined ? { cost: variant.cost } : {}),
+              ...(variant.price !== undefined ? { price: variant.price } : {}),
+            };
+            if (branchId && Object.keys(branchValues).length > 0) {
+              await tx.branchInventory.updateMany({
+                where: { variantId: variant.id, branchId, productId: id },
+                data: branchValues,
+              });
+            }
           } else {
             const created = await tx.productVariant.create({
               data: {
                 productId: id,
                 name: variant.name,
+                // Misma política de inventario que el producto — ver el alta.
+                trackInventory: updatedProduct.trackInventory,
                 cost: variant.cost ?? 0,
                 price: variant.price ?? 0,
               },
               select: { id: true },
             });
             keepIds.add(created.id);
-            await this.seedBranchInventory(tx, tenantId, product, [created.id], variant.stock ?? 0);
+            // `updatedProduct`, no `product`: este último es el snapshot ANTERIOR
+            // al update. Con el viejo, una variante añadida en el mismo guardado
+            // que cambia el precio del producto heredaba el precio anterior en
+            // todas las sucursales menos la del contexto.
+            await this.seedBranchInventory(tx, tenantId, updatedProduct, [created.id], {
+              branchId: stockBranchId,
+              stock: variant.stock ?? 0,
+              price: variant.price,
+              cost: variant.cost,
+            });
           }
         }
 
@@ -798,13 +889,23 @@ export class ProductsService {
       },
       take: limit,
       orderBy: { stock: 'asc' },
-      include: { product: { include: { category: true } } },
+      include: {
+        product: { include: { category: true } },
+        variant: { select: { id: true, name: true, isDefault: true } },
+      },
     });
 
+    // Cada fila es una variante en una sucursal, así que un producto con varias
+    // variantes bajas aparece varias veces. Se identifica cuál: sin `variantId`
+    // ni `variantName` la lista repetía el mismo producto sin decir qué reponer.
+    // `variantName` es null en la variante default — ahí la línea ES el producto.
     return rows.map((row) => ({
       ...row.product,
       stock: row.stock,
       lowStockAlert: row.lowStockAlert,
+      branchId: row.branchId,
+      variantId: row.variantId,
+      variantName: row.variant.isDefault ? null : row.variant.name,
     }));
   }
 

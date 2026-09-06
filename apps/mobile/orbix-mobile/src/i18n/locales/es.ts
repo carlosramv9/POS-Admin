@@ -116,6 +116,7 @@ export const es = {
     priceRequired: 'Escribe un precio.',
     priceInvalid: 'Escribe un número válido (ej. 149.90).',
     integerInvalid: 'Escribe un número entero.',
+    variantNameRequired: 'Ponle nombre a la variante.',
   },
 
   wizard: {
@@ -395,7 +396,27 @@ export const es = {
     sectionPricing: 'Precio e impuestos',
     sectionCategory: 'Categoría',
     sectionInventory: 'Inventario',
+    sectionVariants: 'Variantes',
     sectionVisibility: 'Estado y visibilidad',
+    variants: {
+      add: 'Agregar variante',
+      name: 'Nombre',
+      namePlaceholder: 'Ej. Talla M',
+      cost: 'Costo',
+      price: 'Precio',
+      stock: 'Existencia',
+      remove: 'Quitar',
+      empty:
+        'Sin variantes. Agrega una si este producto se vende en varias presentaciones con existencia, costo y precio propios.',
+      branchScopeHint: 'El precio, el costo y la existencia son los de la sucursal activa.',
+      noBranchHint:
+        'Tu sesión no tiene una sucursal activa: solo puedes nombrar variantes. Elige una sucursal para capturar precio, costo y existencia.',
+      stockReadonlyHint: 'La existencia se ajusta desde Inventario.',
+      removeConfirmTitle: '¿Quitar la variante?',
+      removeConfirmDescription:
+        'Se eliminará "{{name}}" junto con su existencia en todas las sucursales. Esta acción no se puede deshacer.',
+      nonSimpleHint: 'Este tipo de producto no maneja variantes.',
+    },
     serviceInventoryHint: 'Los servicios no manejan inventario directo. Solo se registra la venta.',
     nonSimpleInventoryHint: 'Este tipo de producto no maneja stock propio.',
     image: {

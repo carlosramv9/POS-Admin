@@ -51,12 +51,17 @@ export class UpdateProductDto {
   @IsEnum(ProductStatus)
   status?: ProductStatus;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  stock?: number;
+  /**
+   * `stock` NO se acepta al editar, a propósito.
+   *
+   * Escribirlo actualizaba `products.stock` —la columna espejo legacy— sin tocar
+   * `branch_inventory`, que es de donde se lee la existencia: el usuario cambiaba
+   * el número, guardaba, y no pasaba nada visible. De paso desincronizaba el
+   * espejo, que el motor de inventario usaba para sembrar filas nuevas.
+   *
+   * La existencia se mueve por su flujo propio, que sí escribe el
+   * `InventoryMovement` correspondiente: `PATCH /products/:id/stock`.
+   */
 
   @ApiPropertyOptional()
   @IsOptional()

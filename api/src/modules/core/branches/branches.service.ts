@@ -37,9 +37,64 @@ export class BranchesService {
       await this.prisma.branch.updateMany({ where: { tenantId, isMain: true }, data: { isMain: false } });
     }
 
-    return this.prisma.branch.create({
+    const branch = await this.prisma.branch.create({
       data: { ...dto, tenantId },
       include: { manager: { select: { id: true, firstName: true, lastName: true, email: true } } },
+    });
+
+    await this.seedInventoryForBranch(branch.id, tenantId);
+
+    return branch;
+  }
+
+  /**
+   * Siembra el catálogo completo del tenant en una sucursal recién creada: una
+   * fila de existencias por cada variante de cada producto, con existencia CERO
+   * y los valores comerciales del producto.
+   *
+   * Sin esto la sucursal nacía sin una sola fila y el inventario aparecía vacío
+   * hasta el primer movimiento, que era además quien creaba la fila sobre la
+   * marcha. La existencia arranca en cero porque abrir una sucursal no crea
+   * mercancía: se surte con una compra, una transferencia o un conteo inicial.
+   *
+   * `skipDuplicates` la hace idempotente. El fallo no tumba el alta de la
+   * sucursal: se puede resembrar, y la siembra de emergencia del motor de
+   * inventario sigue cubriendo la fila que falte.
+   */
+  private async seedInventoryForBranch(branchId: string, tenantId: string): Promise<void> {
+    const variants = await this.prisma.productVariant.findMany({
+      where: { product: { tenantId } },
+      select: {
+        id: true,
+        productId: true,
+        product: {
+          select: {
+            price: true,
+            costPrice: true,
+            comparePrice: true,
+            lastCost: true,
+            avgCost: true,
+            lowStockAlert: true,
+          },
+        },
+      },
+    });
+    if (variants.length === 0) return;
+
+    await this.prisma.branchInventory.createMany({
+      data: variants.map((variant) => ({
+        branchId,
+        productId: variant.productId,
+        variantId: variant.id,
+        stock: 0,
+        cost: variant.product.costPrice,
+        price: variant.product.price,
+        comparePrice: variant.product.comparePrice,
+        lastCost: variant.product.lastCost,
+        avgCost: variant.product.avgCost,
+        lowStockAlert: variant.product.lowStockAlert,
+      })),
+      skipDuplicates: true,
     });
   }
 

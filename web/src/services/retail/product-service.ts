@@ -188,7 +188,10 @@ export async function updateProduct(id: string, data: Product): Promise<Product>
     costPrice: data.costPrice,
     categoryId: data.categoryId,
     status: data.status,
-    stock: data.stock,
+    // `stock` NO viaja en el PATCH: el backend lo rechaza. Escribirlo solo movía
+    // la columna espejo `products.stock` sin tocar las existencias por sucursal,
+    // de las que se lee — el usuario cambiaba el número y no pasaba nada. La
+    // existencia se ajusta por `PATCH products/:id/stock`, que deja movimiento.
     trackInventory: data.trackInventory,
     lowStockAlert: data.lowStockAlert,
     metaTitle: data.metaTitle,

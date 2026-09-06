@@ -10,22 +10,33 @@ export class ProductVariantDto {
   @MaxLength(200)
   name: string;
 
-  @ApiPropertyOptional({ default: 0 })
+  /**
+   * Costo y precio de la variante EN LA SUCURSAL EN CONTEXTO — viven en
+   * `branch_inventory` por (sucursal, variante). Guardar aquí nunca cambia el
+   * precio de la misma variante en otra sucursal.
+   */
+  @ApiPropertyOptional({ default: 0, description: 'Costo en la sucursal en contexto' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   cost?: number;
 
-  @ApiPropertyOptional({ default: 0 })
+  @ApiPropertyOptional({ default: 0, description: 'Precio en la sucursal en contexto' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   price?: number;
 
+  /**
+   * Solo se aplica al ALTA de la variante. Al editar una variante existente se
+   * ignora: la existencia se mueve por movimientos de inventario, no por
+   * guardar el formulario.
+   */
   @ApiPropertyOptional({
-    description: 'Existencia de esta variante en la sucursal en contexto (o la principal).',
+    description:
+      'Existencia inicial de esta variante en la sucursal en contexto. Se ignora al editar una variante existente.',
     default: 0,
   })
   @IsOptional()

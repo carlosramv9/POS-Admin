@@ -359,15 +359,20 @@ describe('InventoryConsumptionEngine', () => {
       expect(calls.branchInventoryCreate).toHaveLength(0); // ya existía la fila
     });
 
-    it('seeds the branch row from the product before applying the delta', async () => {
-      // Sin fila previa: el engine la siembra con el stock global ANTES de aplicar
-      // el delta (si no, el updateMany afectaría 0 filas y la venta se perdería).
+    it('seeds the branch row at zero before applying the delta', async () => {
+      // Sin fila previa: el engine la siembra ANTES de aplicar el delta (si no,
+      // el updateMany afectaría 0 filas y la venta se perdería en silencio),
+      // pero en CERO — no con el stock global, que es la suma de todas las
+      // variantes de todas las sucursales. Con la fila en cero la venta no tiene
+      // de dónde descontar y se rechaza, que es el resultado correcto.
       const { tx, calls, rows } = makeTx({ p1: simple('p1', 25) }, {}, { branchRows: new Set() });
-      await engine.consume(tx as never, [{ productId: 'p1', quantity: 2, itemType: 'PRODUCT' }], CTX);
+      await expect(
+        engine.consume(tx as never, [{ productId: 'p1', quantity: 2, itemType: 'PRODUCT' }], CTX),
+      ).rejects.toBeInstanceOf(BadRequestException);
       expect(calls.branchInventoryCreate).toEqual([
-        { productId: 'p1', variantId: 'v-p1', branchId: 'branch-1', stock: 25 },
+        { productId: 'p1', variantId: 'v-p1', branchId: 'branch-1', stock: 0 },
       ]);
-      expect(rows.get('branch-1:v-p1')).toBe(23); // 25 - 2
+      expect(rows.get('branch-1:v-p1')).toBe(0);
     });
 
     it('falls back to the tenant main branch when the context has no branch', async () => {

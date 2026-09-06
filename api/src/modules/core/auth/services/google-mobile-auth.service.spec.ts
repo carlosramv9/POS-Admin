@@ -20,6 +20,11 @@ function buildService(configValues: Record<string, unknown> = {}) {
   const defaults: Record<string, unknown> = {
     'googleOAuth.mobile.clientIds': { ios: 'ios-client-id', android: 'android-client-id', web: undefined },
     'googleOAuth.mobile.webClientSecret': undefined,
+    // Client "servidor" contra el que se verifica un id_token del SDK nativo
+    // (ver `serverClientId`): ni iOS ni Android firman el token, lo hace
+    // siempre el client tipo Web. Sin él, todo el camino de `idToken` corta en
+    // 503 antes de llegar a la verificación que estos casos ejercitan.
+    'googleOAuth.clientId': 'web-client-id',
   };
   const config = { get: jest.fn((key: string) => (key in configValues ? configValues[key] : defaults[key])) };
   return new GoogleMobileAuthService(config as never);
@@ -29,7 +34,9 @@ describe('GoogleMobileAuthService', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('rechaza con 503 si no hay client_id configurado para la plataforma', async () => {
-    const service = buildService();
+    // Servidor sin ningún client Web registrado: es justo lo que este caso
+    // ejercita, así que se anula el default.
+    const service = buildService({ 'googleOAuth.clientId': undefined });
 
     await expect(
       service.verify({ platform: 'web', idToken: 'x' } as never),
