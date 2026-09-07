@@ -25,6 +25,12 @@ export interface InventoryLineItem {
   productId: string | null;
   quantity: number;
   itemType?: 'PRODUCT' | 'SERVICE' | null;
+  /**
+   * Variante vendida. Omitirla significa "la default" — es lo que hacen los
+   * llamadores que todavía hablan solo de productos, y lo que resuelve
+   * `VariantInventoryResolver`. Con ella, el descuento cae sobre ESA variante.
+   */
+  variantId?: string | null;
 }
 
 export interface InventoryContext {
@@ -43,6 +49,8 @@ interface ProductStockEffect {
   productId: string;
   productName: string;
   quantity: number;
+  /** null = la variante default del producto (la resuelve el engine). */
+  variantId: string | null;
 }
 
 interface SupplyStockEffect {
@@ -113,6 +121,16 @@ const PRODUCT_LOAD_SELECT = {
 
 const MAX_COMBO_DEPTH = 8;
 
+/**
+ * Clave de agregación de un efecto de producto: (producto, variante).
+ *
+ * Agrupar solo por `productId` fusionaba dos líneas de variantes distintas del
+ * mismo producto en una sola resta —vender una M y una L descontaba dos de la
+ * misma variante—, y al restaurar deshacía la fusión igual de mal. La variante
+ * forma parte de la identidad de lo que se mueve.
+ */
+const effectKey = (productId: string, variantId: string | null) => `${productId}::${variantId ?? ''}`;
+
 @Injectable()
 export class InventoryConsumptionEngine {
   constructor(private readonly inventory: InventoryEngine) {}
@@ -139,6 +157,7 @@ export class InventoryConsumptionEngine {
         delta: -effect.quantity,
         guardInsufficient: true,
         branchId: ctx.branchId,
+        variantId: effect.variantId,
       });
       if (!applied) {
         throw new BadRequestException(
@@ -150,6 +169,7 @@ export class InventoryConsumptionEngine {
           tenantId: ctx.tenantId,
           type: 'VENTA',
           productId: effect.productId,
+          variantId: effect.variantId,
           branchId: ctx.branchId,
           quantity: effect.quantity,
           referenceId: ctx.referenceId,
@@ -204,12 +224,14 @@ export class InventoryConsumptionEngine {
         tenantId: ctx.tenantId,
         delta: effect.quantity,
         branchId: ctx.branchId,
+        variantId: effect.variantId,
       });
       await tx.inventoryMovement.create({
         data: {
           tenantId: ctx.tenantId,
           type: 'DEVOLUCION',
           productId: effect.productId,
+          variantId: effect.variantId,
           branchId: ctx.branchId,
           quantity: effect.quantity,
           referenceId: ctx.referenceId,
@@ -259,6 +281,7 @@ export class InventoryConsumptionEngine {
         effect.productId,
         tenantId,
         branchId,
+        effect.variantId,
       );
       if (available != null && available < effect.quantity) {
         throw new BadRequestException(
@@ -299,7 +322,16 @@ export class InventoryConsumptionEngine {
     for (const item of items) {
       if (item.itemType === 'SERVICE' || !item.productId) continue;
       if (!Number.isFinite(item.quantity) || item.quantity <= 0) continue;
-      await this.expand(tx, item.productId, tenantId, item.quantity, effects, cache, 0);
+      await this.expand(
+        tx,
+        item.productId,
+        tenantId,
+        item.quantity,
+        effects,
+        cache,
+        0,
+        item.variantId ?? null,
+      );
     }
 
     return effects;
@@ -313,6 +345,13 @@ export class InventoryConsumptionEngine {
     effects: ResolvedEffects,
     cache: Map<string, LoadedProduct>,
     depth: number,
+    /**
+     * Variante de la línea. Solo la tiene el nivel superior: los hijos de un
+     * combo se consumen por su variante default, porque el combo referencia
+     * productos, no variantes (ADR-0030 deja la receta/variante por hijo fuera
+     * de v1).
+     */
+    variantId: string | null,
   ): Promise<void> {
     if (depth > MAX_COMBO_DEPTH) {
       throw new BadRequestException(
@@ -327,14 +366,16 @@ export class InventoryConsumptionEngine {
     switch (product.type) {
       case ProductType.SIMPLE: {
         if (!product.trackInventory) return;
-        const current = effects.products.get(product.id);
+        const key = effectKey(product.id, variantId);
+        const current = effects.products.get(key);
         if (current) {
           current.quantity += multiplier;
         } else {
-          effects.products.set(product.id, {
+          effects.products.set(key, {
             productId: product.id,
             productName: product.name,
             quantity: multiplier,
+            variantId,
           });
         }
         return;
@@ -377,6 +418,10 @@ export class InventoryConsumptionEngine {
             effects,
             cache,
             depth + 1,
+            // Los hijos de un combo no llevan variante: se consumen por la suya
+            // default. La variante del combo (si la tiene) es una presentación
+            // del combo, no una selección de sus componentes.
+            null,
           );
         }
         return;

@@ -10,7 +10,7 @@ import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { BulkUpdateInventoryDto, TransferStockDto } from './dto/update-inventory.dto';
 import { VariantInventoryResolver } from '../../retail/inventory/variant-inventory.resolver';
-import { Branch, BranchInventory } from '@prisma/client';
+import { Branch, BranchInventory, Prisma } from '@prisma/client';
 
 @Injectable()
 export class BranchesService {
@@ -219,20 +219,41 @@ export class BranchesService {
     });
   }
 
-  async updateInventoryItem(branchId: string, productId: string, stock: number): Promise<BranchInventory> {
+  /**
+   * Variante sobre la que opera una acción de inventario de sucursal: la que
+   * indica el llamador (validada contra el producto y el tenant) o, si no
+   * indica ninguna, la default. Antes se forzaba SIEMPRE la default, así que
+   * contar, ajustar o trasladar una talla concreta era imposible.
+   */
+  private async resolveTargetVariant(
+    tx: Prisma.TransactionClient | PrismaService,
+    productId: string,
+    tenantId: string,
+    variantId?: string | null,
+  ): Promise<string | null> {
+    if (variantId) {
+      return this.variants.assertVariantOfProduct(tx as Prisma.TransactionClient, productId, tenantId, variantId);
+    }
+    return this.variants.ensureDefaultVariantId(tx as Prisma.TransactionClient, productId, tenantId);
+  }
+
+  async updateInventoryItem(
+    branchId: string,
+    productId: string,
+    stock: number,
+    variantId?: string | null,
+  ): Promise<BranchInventory> {
     const tenantId = this.tenantContext.requireTenantId();
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId, tenantId } });
     if (!branch) throw new NotFoundException('Branch not found');
 
     await this.assertProductInTenant(tenantId, productId);
 
-    // El inventario se lleva por variante; esta API sigue siendo por producto,
-    // así que apunta a la variante default (la línea "el producto en sí").
-    const variantId = await this.variants.ensureDefaultVariantId(this.prisma, productId, tenantId);
-    if (!variantId) throw new NotFoundException('Product not found');
+    const targetVariantId = await this.resolveTargetVariant(this.prisma, productId, tenantId, variantId);
+    if (!targetVariantId) throw new NotFoundException('Product not found');
 
     const existing = await this.prisma.branchInventory.findUnique({
-      where: { branchId_variantId: { branchId, variantId } },
+      where: { branchId_variantId: { branchId, variantId: targetVariantId } },
       select: { stock: true },
     });
 
@@ -243,9 +264,9 @@ export class BranchesService {
     // que el ajuste manual quede trazable (antes solo existía audit.log).
     const result = await this.prisma.$transaction(async (tx) => {
       const upserted = await tx.branchInventory.upsert({
-        where: { branchId_variantId: { branchId, variantId } },
+        where: { branchId_variantId: { branchId, variantId: targetVariantId } },
         update: { stock },
-        create: { branchId, productId, variantId, stock },
+        create: { branchId, productId, variantId: targetVariantId, stock },
       });
       if (delta !== 0) {
         await tx.inventoryMovement.create({
@@ -253,6 +274,7 @@ export class BranchesService {
             tenantId,
             type: 'AJUSTE',
             productId,
+            variantId: targetVariantId,
             branchId,
             quantity: delta,
             referenceId: `${branchId}:${productId}`,
@@ -284,14 +306,7 @@ export class BranchesService {
     // Conteo físico / ajuste masivo. Mismo resultado de stock; se AÑADE un
     // movimiento AJUSTE por cada diferencia para dejar el conteo trazable.
     const productIds = dto.items.map((i) => i.productId);
-    const existingRows = await this.prisma.branchInventory.findMany({
-      where: { branchId, productId: { in: productIds } },
-      select: { productId: true, stock: true },
-    });
-    const prevByProduct = new Map(existingRows.map((r) => [r.productId, r.stock]));
 
-    // Resuelto fuera de la transacción para no alargarla: el conteo físico es
-    // por producto, pero cada fila cuelga de la variante default.
     // Los ids llegan en el body: se rechaza el lote completo si alguno no es de
     // este tenant, en vez de saltárselo en silencio.
     const owned = await this.prisma.product.findMany({
@@ -302,18 +317,31 @@ export class BranchesService {
       throw new NotFoundException('Alguno de los productos no existe en esta empresa');
     }
 
-    const variantByProduct = new Map<string, string>();
-    for (const productId of productIds) {
-      const variantId = await this.variants.ensureDefaultVariantId(this.prisma, productId, tenantId);
-      if (variantId) variantByProduct.set(productId, variantId);
+    // Resuelto fuera de la transacción para no alargarla. Cada línea del conteo
+    // apunta a UNA variante: la que traiga, o la default. Un mismo producto
+    // puede aparecer varias veces, una por presentación contada.
+    const variantByLine: (string | null)[] = [];
+    for (const item of dto.items) {
+      variantByLine.push(
+        await this.resolveTargetVariant(this.prisma, item.productId, tenantId, item.variantId),
+      );
     }
 
+    // La existencia previa se indexa por VARIANTE, no por producto: con varias
+    // variantes del mismo producto en la sucursal, la clave por producto se
+    // quedaba con una fila cualquiera y el delta del movimiento salía mal.
+    const existingRows = await this.prisma.branchInventory.findMany({
+      where: { branchId, variantId: { in: variantByLine.filter((v): v is string => v !== null) } },
+      select: { variantId: true, stock: true },
+    });
+    const prevByVariant = new Map(existingRows.map((r) => [r.variantId, r.stock]));
+
     await this.prisma.$transaction(
-      dto.items.flatMap((item) => {
-        const variantId = variantByProduct.get(item.productId);
+      dto.items.flatMap((item, index) => {
+        const variantId = variantByLine[index];
         if (!variantId) return [];
 
-        const delta = item.stock - (prevByProduct.get(item.productId) ?? 0);
+        const delta = item.stock - (prevByVariant.get(variantId) ?? 0);
         const ops: ReturnType<typeof this.prisma.branchInventory.upsert>[] = [
           this.prisma.branchInventory.upsert({
             where: { branchId_variantId: { branchId, variantId } },
@@ -328,6 +356,7 @@ export class BranchesService {
                 tenantId,
                 type: 'AJUSTE',
                 productId: item.productId,
+                variantId,
                 branchId,
                 quantity: delta,
                 referenceId: branchId,
@@ -352,7 +381,10 @@ export class BranchesService {
 
     await this.assertProductInTenant(tenantId, dto.productId);
 
-    const variantId = await this.variants.ensureDefaultVariantId(this.prisma, dto.productId, tenantId);
+    // La variante que se traslada: la indicada, o la default. Antes siempre la
+    // default, así que mover 5 tallas L entre sucursales movía en realidad 5 de
+    // "el producto en sí" y la L quedaba igual en las dos.
+    const variantId = await this.resolveTargetVariant(this.prisma, dto.productId, tenantId, dto.variantId);
     if (!variantId) throw new NotFoundException('Product not found');
 
     const fromInv = await this.prisma.branchInventory.findUnique({
@@ -387,6 +419,7 @@ export class BranchesService {
           tenantId,
           type: 'TRANSFERENCIA',
           productId: dto.productId,
+          variantId,
           branchId: fromBranchId,
           quantity: dto.quantity,
           referenceId: transferId,
@@ -399,6 +432,7 @@ export class BranchesService {
           tenantId,
           type: 'TRANSFERENCIA',
           productId: dto.productId,
+          variantId,
           branchId: dto.toBranchId,
           quantity: dto.quantity,
           referenceId: transferId,

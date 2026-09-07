@@ -350,6 +350,9 @@ export class OrdersService {
             orderId: newOrder.id,
             itemType: 'PRODUCT',
             productId: product.id,
+            // Qué variante se vendió. Sin esto la orden solo decía el producto,
+            // y ni la devolución ni los reportes podían saber la talla.
+            variantId: item.variantId ?? null,
             name: product.name,
             sku: product.sku,
             description: item.description ?? null,
@@ -393,6 +396,7 @@ export class OrdersService {
           productId: i.productId ?? null,
           quantity: i.quantity,
           itemType: 'PRODUCT' as const,
+          variantId: i.variantId ?? null,
         })),
         { tenantId, branchId: branchId ?? null, userId: createdById ?? null, referenceId: newOrder.id, referenceType: 'ORDER' },
       );
@@ -700,10 +704,14 @@ export class OrdersService {
         );
       }
     }
+    // La reversa devuelve a la MISMA variante que se vendió, no a la default:
+    // la simetría consume/restore es lo que evita que cancelar una venta de
+    // tallas L acabe sumando existencia a "el producto en sí".
     const restorableItems = order.items
       .map((it) => ({
         productId: it.productId,
         itemType: it.itemType,
+        variantId: it.variantId,
         quantity: it.quantity - (refundedQtyByItem.get(it.id) ?? 0),
       }))
       .filter((it) => it.quantity > 0);
@@ -1163,6 +1171,8 @@ export class OrdersService {
             productId: l.orderItem.productId,
             quantity: l.quantity,
             itemType: l.orderItem.itemType,
+            // Se reingresa a la variante de la línea reembolsada.
+            variantId: l.orderItem.variantId,
           })),
           {
             tenantId,

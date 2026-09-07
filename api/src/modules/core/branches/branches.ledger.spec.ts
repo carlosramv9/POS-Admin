@@ -51,7 +51,14 @@ function build() {
     { requireTenantId: () => TENANT } as never,
     { log: jest.fn() } as never,
     {} as never,
-    { ensureDefaultVariantId } as never,
+    {
+      ensureDefaultVariantId,
+      // Solo se usa cuando la línea nombra una variante explícita; devuelve el
+      // mismo id tras comprobar la propiedad.
+      assertVariantOfProduct: jest.fn((_tx: unknown, _p: string, _t: string, variantId: string) =>
+        Promise.resolve(variantId),
+      ),
+    } as never,
   );
 
   return { service, invCreate, biUpsert, biUpdate, biFindUnique, biFindMany, ensureDefaultVariantId };
@@ -123,9 +130,11 @@ describe('BranchesService — ledger de inventario (A0-01)', () => {
   describe('bulkUpdateInventory (conteo físico)', () => {
     it('genera un AJUSTE por cada diferencia; omite los items sin cambio', async () => {
       const { service, invCreate, biFindMany, biUpsert, ensureDefaultVariantId } = build();
+      // La existencia previa se indexa por VARIANTE: un producto puede tener
+      // varias filas en la misma sucursal, una por presentación contada.
       biFindMany.mockResolvedValue([
-        { productId: 'p1', stock: 10 },
-        { productId: 'p2', stock: 0 },
+        { variantId: variantOf('p1'), stock: 10 },
+        { variantId: variantOf('p2'), stock: 0 },
       ]);
 
       await service.bulkUpdateInventory('branch', {

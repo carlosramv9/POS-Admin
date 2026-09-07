@@ -86,13 +86,19 @@ export class BranchesController {
 
   @Patch(':id/inventory/:productId')
   @RequirePermissions('branches:inventory')
-  @ApiOperation({ summary: 'Update stock for one product in this branch' })
+  @ApiOperation({
+    summary: 'Update stock for one product (or one of its variants) in this branch',
+    description:
+      'Sin `variantId` ajusta la variante default — "el producto en sí"—, que es el ' +
+      'comportamiento histórico. Con `variantId` ajusta esa presentación concreta.',
+  })
   updateInventoryItem(
     @Param('id') branchId: string,
     @Param('productId') productId: string,
     @Body('stock') stock: number,
+    @Body('variantId') variantId?: string,
   ) {
-    return this.branchesService.updateInventoryItem(branchId, productId, stock);
+    return this.branchesService.updateInventoryItem(branchId, productId, stock, variantId ?? null);
   }
 
   @Post(':id/inventory/bulk')

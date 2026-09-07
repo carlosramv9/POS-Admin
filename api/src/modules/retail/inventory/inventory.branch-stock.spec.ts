@@ -96,9 +96,12 @@ function makeTx(
       }),
     },
     productVariant: {
-      findFirst: jest.fn(({ where }: { where: { productId: string } }) =>
-        Promise.resolve(hasDefaultVariant ? { id: variantOf(where.productId) } : null),
-      ),
+      // Con `where.id`, es la comprobación de propiedad de una variante
+      // explícita; sin él, la búsqueda de la default del producto.
+      findFirst: jest.fn(({ where }: { where: { productId: string; id?: string } }) => {
+        if (where.id) return Promise.resolve({ id: where.id });
+        return Promise.resolve(hasDefaultVariant ? { id: variantOf(where.productId) } : null);
+      }),
     },
     branch: {
       findFirst: jest.fn(() => Promise.resolve(mainBranchId ? { id: mainBranchId } : null)),
@@ -219,6 +222,80 @@ describe('InventoryConsumptionEngine — BranchInventory no negativo (P1-04)', (
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(calls.branchCreate).toEqual([{ key: 'b1:v-p1', stock: 0 }]);
     expect(rows.get('b1:v-p1')).toBe(0);
+  });
+
+  /**
+   * El riesgo central de la fase 1: `resolveEffects` agregaba por `productId`,
+   * así que dos líneas de variantes distintas del mismo producto se fusionaban
+   * en una sola resta —y la reversa deshacía la fusión igual de mal—. La
+   * variante forma parte de la identidad de lo que se mueve.
+   */
+  describe('dos variantes del mismo producto', () => {
+    const dosVariantes = () =>
+      makeTx({ p1: simple('p1', 100) }, {}, { 'b1:v-talla-m': 10, 'b1:v-talla-l': 4 });
+
+    it('se descuentan por separado, cada una de su propia existencia', async () => {
+      const { tx, rows } = dosVariantes();
+      await engine().consume(
+        tx as never,
+        [
+          { productId: 'p1', quantity: 3, itemType: 'PRODUCT', variantId: 'v-talla-m' },
+          { productId: 'p1', quantity: 1, itemType: 'PRODUCT', variantId: 'v-talla-l' },
+        ],
+        ctx('b1'),
+      );
+      expect(rows.get('b1:v-talla-m')).toBe(7); // 10 - 3
+      expect(rows.get('b1:v-talla-l')).toBe(3); // 4 - 1
+    });
+
+    it('la falta de existencia en UNA variante no se cubre con la de la otra', async () => {
+      const { tx, rows } = dosVariantes();
+      await expect(
+        engine().consume(
+          tx as never,
+          [{ productId: 'p1', quantity: 9, itemType: 'PRODUCT', variantId: 'v-talla-l' }],
+          ctx('b1'),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(rows.get('b1:v-talla-l')).toBe(4); // intacta
+      expect(rows.get('b1:v-talla-m')).toBe(10); // la M no se toca
+    });
+
+    it('la reversa devuelve a la MISMA variante (round-trip simétrico)', async () => {
+      const { tx, rows } = dosVariantes();
+      const lineas = [
+        { productId: 'p1', quantity: 3, itemType: 'PRODUCT' as const, variantId: 'v-talla-m' },
+        { productId: 'p1', quantity: 1, itemType: 'PRODUCT' as const, variantId: 'v-talla-l' },
+      ];
+      await engine().consume(tx as never, lineas, ctx('b1'));
+      await engine().restore(tx as never, lineas, ctx('b1'));
+      expect(rows.get('b1:v-talla-m')).toBe(10);
+      expect(rows.get('b1:v-talla-l')).toBe(4);
+    });
+
+    it('dos líneas de la MISMA variante sí se agregan en un solo movimiento', async () => {
+      const { tx, rows } = dosVariantes();
+      await engine().consume(
+        tx as never,
+        [
+          { productId: 'p1', quantity: 2, itemType: 'PRODUCT', variantId: 'v-talla-m' },
+          { productId: 'p1', quantity: 3, itemType: 'PRODUCT', variantId: 'v-talla-m' },
+        ],
+        ctx('b1'),
+      );
+      expect(rows.get('b1:v-talla-m')).toBe(5); // 10 - 5, agregado
+    });
+
+    it('sin variante en la línea se sigue usando la default', async () => {
+      const { tx, rows } = makeTx({ p1: simple('p1', 100) }, {}, { 'b1:v-p1': 8, 'b1:v-talla-m': 10 });
+      await engine().consume(
+        tx as never,
+        [{ productId: 'p1', quantity: 2, itemType: 'PRODUCT' }],
+        ctx('b1'),
+      );
+      expect(rows.get('b1:v-p1')).toBe(6);
+      expect(rows.get('b1:v-talla-m')).toBe(10);
+    });
   });
 
   it('sin fila previa: una entrada (restore) la siembra en cero y suma encima', async () => {

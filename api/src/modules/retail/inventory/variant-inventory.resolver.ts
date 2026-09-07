@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -119,21 +119,60 @@ export class VariantInventoryResolver {
   }
 
   /**
+   * Comprueba que una variante indicada por el llamador sea DE ESE producto y
+   * DE ESE tenant, y devuelve su id.
+   *
+   * El `variantId` viaja en el body (línea del POS, de una compra, de un
+   * ajuste), así que es entrada no confiable exactamente igual que `productId`.
+   * Sin esta comprobación, un id ajeno acababa creando una fila de
+   * `branch_inventory` que enlazaba una sucursal propia con la variante de otra
+   * organización, y el movimiento se aplicaba sobre ella.
+   *
+   * Falla cerrado: una variante que no corresponde es un error del llamador, no
+   * un motivo para caer en silencio sobre la default y descontar de otra línea.
+   */
+  async assertVariantOfProduct(
+    tx: Prisma.TransactionClient,
+    productId: string,
+    tenantId: string,
+    variantId: string,
+  ): Promise<string> {
+    const variant = await tx.productVariant.findFirst({
+      where: { id: variantId, productId, product: { tenantId } },
+      select: { id: true },
+    });
+    if (!variant) {
+      throw new BadRequestException('La variante no pertenece a este producto');
+    }
+    return variant.id;
+  }
+
+  /**
    * Resuelve ambas llaves de una vez. `null` en cualquiera de las dos significa
    * que este producto no es direccionable en el inventario por variante todavía.
+   *
+   * `variantId` explícito manda: se verifica que sea del producto y se usa tal
+   * cual. Antes, la sucursal y la variante se resolvían juntas y una variante
+   * explícita SIN sucursal explícita se descartaba entera, cayendo en la
+   * default — y como hoy la mayoría de las órdenes no trae `branchId`, vender
+   * una talla concreta seguía descontando de "el producto en sí". Las dos
+   * llaves se resuelven ahora por separado.
    */
   async resolve(
     tx: Prisma.TransactionClient,
     productId: string,
     tenantId: string,
     branchId?: string | null,
+    variantId?: string | null,
   ): Promise<{ variantId: string; branchId: string } | null> {
-    const [variantId, resolvedBranchId] = await Promise.all([
-      this.resolveVariantId(tx, productId, tenantId),
+    const [resolvedVariantId, resolvedBranchId] = await Promise.all([
+      variantId
+        ? this.assertVariantOfProduct(tx, productId, tenantId, variantId)
+        : this.resolveVariantId(tx, productId, tenantId),
       this.resolveBranchId(tx, tenantId, branchId),
     ]);
 
-    if (!variantId || !resolvedBranchId) return null;
-    return { variantId, branchId: resolvedBranchId };
+    if (!resolvedVariantId || !resolvedBranchId) return null;
+    return { variantId: resolvedVariantId, branchId: resolvedBranchId };
   }
 }

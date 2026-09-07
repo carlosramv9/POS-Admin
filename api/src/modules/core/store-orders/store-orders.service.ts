@@ -143,6 +143,8 @@ export class StoreOrdersService {
           productId: item.productId,
           quantity: item.quantity,
           itemType: 'PRODUCT' as const,
+          // La variante que pidió el cliente; sin ella, la default.
+          variantId: item.variantId,
         })),
         {
           tenantId,

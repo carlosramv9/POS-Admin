@@ -42,12 +42,15 @@ function makeTx() {
       findFirst: jest.fn().mockResolvedValue({ ...PRODUCT_ROW }),
       findUnique: jest.fn().mockResolvedValue({ ...PRODUCT_ROW }),
     },
-    // Variante default del producto: la línea implícita "el producto en sí".
+    // Variante del producto. Con `where.id` responde a la comprobación de
+    // propiedad de una variante explícita; sin él, a la búsqueda de la default
+    // — la línea implícita "el producto en sí".
     productVariant: {
-      // Devuelve la variante default; los tests que ejercitan el fallback legacy
-      // la anulan con `mockResolvedValue(null)`, de ahí el tipo nullable.
-      findFirst: jest.fn(({ where }: { where: { productId: string } }): Promise<{ id: string } | null> =>
-        Promise.resolve({ id: `v-${where.productId}` }),
+      // Los tests que ejercitan el fallback legacy la anulan con
+      // `mockResolvedValue(null)`, de ahí el tipo nullable.
+      findFirst: jest.fn(
+        ({ where }: { where: { productId: string; id?: string } }): Promise<{ id: string } | null> =>
+          Promise.resolve({ id: where.id ?? `v-${where.productId}` }),
       ),
       create: jest.fn().mockResolvedValue({ id: 'v-nueva' }),
     },
@@ -91,6 +94,7 @@ describe('InventoryEngine', () => {
           tenantId: 't1',
           type: 'VENTA',
           productId: 'p1',
+          variantId: null,
           branchId: null,
           quantity: 3,
           referenceId: null,
@@ -159,18 +163,51 @@ describe('InventoryEngine', () => {
       });
     });
 
-    it('con variante y sucursal explícitas → no consulta al resolver', async () => {
+    it('con variante explícita → la usa, tras comprobar que es de ese producto', async () => {
       const tx = makeTx();
       await engine.applyProductStockDelta(tx as never, {
         productId: 'p1', tenantId: 't1', delta: 3, variantId: 'v-talla-m', branchId: 'b9',
       });
 
-      expect(tx.productVariant.findFirst).not.toHaveBeenCalled();
+      // El `variantId` viaja en el body, así que se verifica su propiedad igual
+      // que la del producto: sin esto, un id ajeno acababa creando una fila que
+      // enlazaba una sucursal propia con la variante de otra organización.
+      expect(tx.productVariant.findFirst).toHaveBeenCalledWith({
+        where: { id: 'v-talla-m', productId: 'p1', product: { tenantId: 't1' } },
+        select: { id: true },
+      });
       expect(tx.branch.findFirst).not.toHaveBeenCalled();
       expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
         where: { variantId: 'v-talla-m', branchId: 'b9' },
         data: { stock: { increment: 3 } },
       });
+    });
+
+    it('con variante explícita SIN sucursal → respeta la variante y resuelve la isMain', async () => {
+      const tx = makeTx();
+      await engine.applyProductStockDelta(tx as never, {
+        productId: 'p1', tenantId: 't1', delta: -1, variantId: 'v-talla-m',
+      });
+
+      // Antes se exigían las DOS llaves explícitas para respetar la variante, de
+      // modo que sin sucursal en el token —el caso mayoritario— la elegida se
+      // descartaba y el descuento caía sobre la default.
+      expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
+        where: { variantId: 'v-talla-m', branchId: 'b-main' },
+        data: { stock: { increment: -1 } },
+      });
+    });
+
+    it('una variante que no es del producto se rechaza en vez de caer en la default', async () => {
+      const tx = makeTx();
+      tx.productVariant.findFirst.mockResolvedValue(null);
+
+      await expect(
+        engine.applyProductStockDelta(tx as never, {
+          productId: 'p1', tenantId: 't1', delta: -1, variantId: 'v-de-otro', branchId: 'b9',
+        }),
+      ).rejects.toThrow('La variante no pertenece a este producto');
+      expect(tx.branchInventory.updateMany).not.toHaveBeenCalled();
     });
   });
 

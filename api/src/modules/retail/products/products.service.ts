@@ -869,6 +869,83 @@ export class ProductsService {
   }
 
   /**
+   * Ajusta la existencia de UNA variante concreta en la sucursal en contexto.
+   *
+   * Hasta ahora no existía ninguna forma de mover la existencia de una variante
+   * con nombre después de crearla: `updateStock`, el ajuste por sucursal, el
+   * conteo masivo y las transferencias apuntaban todos a la default. Una talla
+   * nacía con su número y se quedaba congelada ahí para siempre.
+   *
+   * Mismas garantías que `updateStock`: delta + `InventoryMovement` en una sola
+   * transacción, y el guard de existencia lo aplica la base DENTRO de ella para
+   * que una venta concurrente no pueda dejar el stock en negativo.
+   */
+  async updateVariantStock(productId: string, variantId: string, quantity: number): Promise<Product> {
+    const tenantId = this.tenantContext.requireTenantId();
+    const product = await this.prisma.product.findFirst({ where: { id: productId, tenantId } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (product.type !== 'SIMPLE') {
+      throw new BadRequestException('Solo productos SIMPLE manejan stock directo');
+    }
+
+    const variant = await this.prisma.productVariant.findFirst({
+      where: { id: variantId, productId, product: { tenantId } },
+      select: { id: true, name: true, trackInventory: true },
+    });
+    if (!variant) throw new NotFoundException('Variante no encontrada en este producto');
+    if (!variant.trackInventory) {
+      throw new BadRequestException('Esta variante no rastrea inventario');
+    }
+
+    const branchId = this.tenantContext.getBranchId() ?? null;
+    const before = await this.prisma.$transaction((tx) =>
+      this.inventoryEngine.getProductStock(tx, productId, tenantId, branchId, variantId),
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      const applied = await this.inventoryEngine.applyProductStockDelta(tx, {
+        productId,
+        tenantId,
+        delta: quantity,
+        guardInsufficient: quantity < 0,
+        branchId,
+        variantId,
+      });
+      if (!applied) throw new BadRequestException('Insufficient stock');
+
+      if (quantity !== 0) {
+        await this.inventoryEngine.recordProductMovement(tx, {
+          tenantId,
+          type: 'AJUSTE',
+          productId,
+          variantId,
+          branchId,
+          quantity,
+          referenceId: variantId,
+          referenceType: 'VARIANT_ADJUST',
+          notes: `Ajuste manual de "${variant.name ?? 'sin variante'}" (${quantity >= 0 ? '+' : ''}${quantity})`,
+        });
+      }
+    });
+
+    const after = await this.prisma.$transaction((tx) =>
+      this.inventoryEngine.getProductStock(tx, productId, tenantId, branchId, variantId),
+    );
+
+    await this.audit.log({
+      action: 'INVENTORY_ADJUST',
+      entityType: 'ProductVariant',
+      entityId: variantId,
+      before: { stock: before },
+      after: { stock: after },
+      reason: `Ajuste manual de variante (${quantity >= 0 ? '+' : ''}${quantity})`,
+    });
+
+    return this.findOne(productId);
+  }
+
+  /**
    * Productos bajo su punto de reorden. La comparación stock ≤ mínimo ahora vive
    * entera en `branch_inventory` (antes cruzaba dos columnas de `products` con un
    * field reference), y se acota a la sucursal del contexto cuando la hay.

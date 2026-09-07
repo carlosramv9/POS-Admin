@@ -157,9 +157,32 @@ export class ProductsController {
   @Patch(':id/stock')
   @ApiBearerAuth()
   @RequirePermissions('products:edit')
-  @ApiOperation({ summary: 'Update product stock (SIMPLE only)' })
+  @ApiOperation({
+    summary: 'Update product stock (SIMPLE only)',
+    description:
+      'Ajusta la variante default — "el producto en sí". Para una presentación ' +
+      'concreta, usar `PATCH /products/:id/variants/:variantId/stock`.',
+  })
   updateStock(@Param('id') id: string, @Body('quantity') quantity: number) {
     return this.productsService.updateStock(id, quantity);
+  }
+
+  @Patch(':id/variants/:variantId/stock')
+  @ApiBearerAuth()
+  @RequirePermissions('products:edit')
+  @ApiOperation({
+    summary: 'Adjust the stock of one variant in the current branch',
+    description:
+      'Aplica un delta (positivo o negativo) sobre la existencia de esa variante ' +
+      'en la sucursal del token, y deja su InventoryMovement de tipo AJUSTE. Es la ' +
+      'única forma de mover la existencia de una variante con nombre tras crearla.',
+  })
+  updateVariantStock(
+    @Param('id') id: string,
+    @Param('variantId') variantId: string,
+    @Body('quantity') quantity: number,
+  ) {
+    return this.productsService.updateVariantStock(id, variantId, quantity);
   }
 
   @Get(':id/recipe')

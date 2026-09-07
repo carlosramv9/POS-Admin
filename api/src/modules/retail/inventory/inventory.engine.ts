@@ -44,6 +44,8 @@ export interface ProductMovementInput {
   type: InventoryMovementType;
   productId: string;
   quantity: number;
+  /** Variante movida. Omitirla deja el asiento a nivel de producto (histórico). */
+  variantId?: string | null;
   branchId?: string | null;
   referenceId?: string | null;
   referenceType?: string | null;
@@ -122,6 +124,7 @@ export class InventoryEngine {
         tenantId: input.tenantId,
         type: input.type,
         productId: input.productId,
+        variantId: input.variantId ?? null,
         branchId: input.branchId ?? null,
         quantity: input.quantity,
         referenceId: input.referenceId ?? null,
@@ -171,10 +174,10 @@ export class InventoryEngine {
     tx: Prisma.TransactionClient,
     { productId, tenantId, delta, guardInsufficient, variantId, branchId }: ProductStockDelta,
   ): Promise<boolean> {
-    const target =
-      variantId && branchId
-        ? { variantId, branchId }
-        : await this.resolver.resolve(tx, productId, tenantId, branchId);
+    // La variante explícita y la sucursal se resuelven por separado: exigir las
+    // dos para respetar la variante descartaba la elegida siempre que el token
+    // no traía sucursal, que es el caso mayoritario.
+    const target = await this.resolver.resolve(tx, productId, tenantId, branchId, variantId);
 
     if (!target) {
       // Legacy: sin inventario por variante, `Product.stock` manda. `updateMany`
@@ -353,10 +356,10 @@ export class InventoryEngine {
     delta: number,
     variantId?: string | null,
   ): Promise<void> {
-    const target =
-      variantId && branchId
-        ? { variantId, branchId }
-        : await this.resolver.resolve(tx, productId, tenantId, branchId);
+    // La variante explícita y la sucursal se resuelven por separado: exigir las
+    // dos para respetar la variante descartaba la elegida siempre que el token
+    // no traía sucursal, que es el caso mayoritario.
+    const target = await this.resolver.resolve(tx, productId, tenantId, branchId, variantId);
     if (!target) return;
 
     await this.ensureBranchInventoryRow(tx, productId, tenantId, target.variantId, target.branchId);
@@ -397,10 +400,10 @@ export class InventoryEngine {
     branchId?: string | null,
     variantId?: string | null,
   ): Promise<number | null> {
-    const target =
-      variantId && branchId
-        ? { variantId, branchId }
-        : await this.resolver.resolve(tx, productId, tenantId, branchId);
+    // La variante explícita y la sucursal se resuelven por separado: exigir las
+    // dos para respetar la variante descartaba la elegida siempre que el token
+    // no traía sucursal, que es el caso mayoritario.
+    const target = await this.resolver.resolve(tx, productId, tenantId, branchId, variantId);
 
     if (target) {
       const row = await tx.branchInventory.findUnique({

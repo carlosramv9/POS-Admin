@@ -64,6 +64,20 @@ export class CreateOrderItemDto {
   @IsUUID()
   productId?: string;
 
+  /**
+   * Variante vendida (talla, presentación...). Omitirla significa la default —
+   * "el producto en sí"—, que es el caso de todo producto que nunca se dividió
+   * en presentaciones.
+   *
+   * De ella depende de qué existencia se descuenta: sin este campo, vender una
+   * talla L bajaba el stock de la línea default y el de la L no se movía nunca.
+   * Se valida contra el producto; una variante ajena se rechaza.
+   */
+  @ApiPropertyOptional({ description: 'ID de la variante vendida (por defecto, la del producto sin variante)' })
+  @IsOptional()
+  @IsUUID()
+  variantId?: string;
+
   /** Opcional si itemType = SERVICE — puede ser del catálogo o null (manual) */
   @ApiPropertyOptional({ description: 'ID de servicio del catálogo (itemType=SERVICE)' })
   @IsOptional()

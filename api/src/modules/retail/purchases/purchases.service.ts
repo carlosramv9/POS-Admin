@@ -1,4 +1,5 @@
 ﻿import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { TenantContextService } from '../../../common/context/tenant-context.service';
 import { AuditContextService } from '../../../common/context/audit-context.service';
@@ -18,6 +19,23 @@ export class PurchasesService {
     private variants: VariantInventoryResolver,
   ) {}
 
+  /**
+   * Comprueba que cada `variantId` de las líneas sea de su producto y del
+   * tenant. El id viaja en el body, así que es entrada no confiable igual que
+   * `productId`: sin esto, una orden podía referenciar la variante de otra
+   * organización y la recepción le sumaría existencia.
+   */
+  private async assertVariantsOfLines(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    items: { productId: string; variantId?: string | null }[],
+  ): Promise<void> {
+    for (const item of items) {
+      if (!item.variantId) continue;
+      await this.variants.assertVariantOfProduct(tx, item.productId, tenantId, item.variantId);
+    }
+  }
+
   async create(dto: CreatePurchaseOrderDto) {
     const tenantId = this.tenantContext.requireTenantId();
     const userId = this.auditContext.getUserId();
@@ -35,6 +53,8 @@ export class PurchasesService {
     const total = subtotal + tax;
 
     return this.prisma.$transaction(async (tx) => {
+      await this.assertVariantsOfLines(tx, tenantId, dto.items);
+
       const order = await tx.purchaseOrder.create({
         data: {
           tenantId,
@@ -52,6 +72,7 @@ export class PurchasesService {
           items: {
             create: dto.items.map((item) => ({
               productId: item.productId,
+              variantId: item.variantId ?? null,
               quantityOrdered: item.quantityOrdered,
               unitCost: item.unitCost,
               tax: item.tax ?? 0,
@@ -149,6 +170,7 @@ export class PurchasesService {
       const total = subtotal + tax;
 
       return this.prisma.$transaction(async (tx) => {
+        await this.assertVariantsOfLines(tx, tenantId, newItems as { productId: string; variantId?: string | null }[]);
         await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } });
         return tx.purchaseOrder.update({
           where: { id },
@@ -163,6 +185,7 @@ export class PurchasesService {
             items: {
               create: newItems.map((item) => ({
                 productId: item.productId,
+                variantId: item.variantId ?? null,
                 quantityOrdered: item.quantityOrdered,
                 unitCost: item.unitCost,
                 tax: item.tax ?? 0,
@@ -308,6 +331,10 @@ export class PurchasesService {
           items: {
             create: itemsToReceive.map((ri) => ({
               productId: ri.productId,
+              // La variante la fija la ORDEN, no la recepción: se recibe lo que
+              // se pidió. Tomarla del body dejaría recibir una talla distinta de
+              // la comprada sin que nada lo notara.
+              variantId: orderItemsByProduct.get(ri.productId)?.variantId ?? null,
               quantityReceived: ri.quantityReceived,
             })),
           },
@@ -322,7 +349,14 @@ export class PurchasesService {
         // El costeo promedio ponderado ahora es por (sucursal, variante): cada
         // sucursal lleva su propia base de costo, que es lo correcto cuando el
         // mismo producto se compra a distintos precios en distintas plazas.
-        const variantId = await this.variants.ensureDefaultVariantId(tx, ri.productId, tenantId);
+        //
+        // La variante sale de la línea de la orden. Antes se forzaba la default,
+        // así que comprar 20 tallas L le sumaba las 20 a "el producto en sí" y
+        // la L seguía en cero. `ensureDefaultVariantId` solo cubre el caso de la
+        // orden sin variante (histórica, o un producto de una sola línea).
+        const variantId =
+          orderItem.variantId ??
+          (await this.variants.ensureDefaultVariantId(tx, ri.productId, tenantId));
         const targetBranchId =
           effectiveBranchId ?? (await this.variants.resolveBranchId(tx, tenantId));
 
@@ -386,6 +420,7 @@ export class PurchasesService {
             tenantId,
             type: 'COMPRA',
             productId: ri.productId,
+            variantId,
             branchId: effectiveBranchId,
             quantity: ri.quantityReceived,
             referenceId: id,

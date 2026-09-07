@@ -126,33 +126,33 @@ enum MembershipStatus {
 }
 
 model Tenant {
-  id               String           @id @default(uuid())
-  name             String
-  slug             String           @unique // subdomain / identifier
-  status           TenantStatus     @default(TRIAL)
-  plan             TenantPlan       @default(FREE)
-  enabledModules   String[]         @default([])
-  businessVertical BusinessVertical @default(RETAIL)     @map("business_vertical")
-  businessProfile  BusinessProfile  @default(RETAIL)     @map("business_profile")
-  posOperationMode      PosOperationMode      @default(QUICK_SALE)    @map("pos_operation_mode")
+  id                    String                @id @default(uuid())
+  name                  String
+  slug                  String                @unique // subdomain / identifier
+  status                TenantStatus          @default(TRIAL)
+  plan                  TenantPlan            @default(FREE)
+  enabledModules        String[]              @default([])
+  businessVertical      BusinessVertical      @default(RETAIL) @map("business_vertical")
+  businessProfile       BusinessProfile       @default(RETAIL) @map("business_profile")
+  posOperationMode      PosOperationMode      @default(QUICK_SALE) @map("pos_operation_mode")
   restaurantServiceMode RestaurantServiceMode @default(TABLE_SERVICE) @map("restaurant_service_mode")
-  enabledFeatures  TenantFeature[]  @default([])         @map("enabled_features")
-  settings       Json? // { currency, timezone, logo, address, taxId, ... }
+  enabledFeatures       TenantFeature[]       @default([]) @map("enabled_features")
+  settings              Json? // { currency, timezone, logo, address, taxId, ... }
 
   // ── SaaS user-limit control ────────────────────────────────────────────────
   // overUserLimit is set on downgrade when active users exceed the new plan
   // limit. Soft enforcement: tenant keeps operating but cannot add/activate
   // more users until back under the limit. No automatic deactivation.
-  overUserLimit     Boolean @default(false) @map("over_user_limit")
+  overUserLimit            Boolean @default(false) @map("over_user_limit")
   // Manual cap that overrides the plan default for ANY plan (e.g. ENTERPRISE).
-  userLimitOverride Int?    @map("user_limit_override")
+  userLimitOverride        Int?    @map("user_limit_override")
   // Extra branches added on top of the plan default (addons, upgrades, etc.)
-  extraBranchLimit  Int?    @default(0) @map("extra_branch_limit")
+  extraBranchLimit         Int?    @default(0) @map("extra_branch_limit")
   // Cash sessions open at once per branch. Absolute override of the plan
   // default (not additive), set from the platform panel.
-  cashSessionLimitOverride Int? @map("cash_session_limit_override")
+  cashSessionLimitOverride Int?    @map("cash_session_limit_override")
   // Protected owner — cannot be deactivated.
-  ownerUserId       String? @map("owner_user_id")
+  ownerUserId              String? @map("owner_user_id")
 
   trialEndsAt DateTime?
   createdAt   DateTime  @default(now())
@@ -185,21 +185,21 @@ model Tenant {
   supplyMovements    SupplyMovement[]
   printerConfigs     PrinterConfig[]
 
-  usersLastSelected User[]      @relation("UserLastTenant")
-  employees           Employee[]
-  diningAreas         DiningArea[]
-  restaurantTables    RestaurantTable[]
-  diningOrders        DiningOrder[]
-  dashboards          Dashboard[]
+  usersLastSelected User[]            @relation("UserLastTenant")
+  employees         Employee[]
+  diningAreas       DiningArea[]
+  restaurantTables  RestaurantTable[]
+  diningOrders      DiningOrder[]
+  dashboards        Dashboard[]
   widgets           Widget[]
 
-  licenses          License[]
-  devices           Device[]
+  licenses License[]
+  devices  Device[]
 
   owner User? @relation("TenantOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
 
-  domains Domain[]
-  site    TenantSite?
+  domains             Domain[]
+  site                TenantSite?
   storeWhatsappOrders StoreWhatsappOrder[]
 
   aiUsageEvents   AiUsageEvent[]
@@ -268,9 +268,9 @@ model User {
   updatedAt DateTime   @updatedAt
 
   // ── Identidad Google (OAuth) ───────────────────────────────────────────────
-  googleId      String?  @unique @map("google_id")
-  emailVerified Boolean  @default(false) @map("email_verified")
-  avatarUrl     String?  @map("avatar_url")
+  googleId      String? @unique @map("google_id")
+  emailVerified Boolean @default(false) @map("email_verified")
+  avatarUrl     String? @map("avatar_url")
 
   // ── Protección contra fuerza bruta ─────────────────────────────────────────
   // El throttling por IP no frena un ataque lento y distribuido contra una
@@ -292,10 +292,10 @@ model User {
   // El secreto va cifrado (AES-256-GCM, ver MfaService) porque a diferencia de
   // una contraseña no se puede hashear: hay que poder leerlo de vuelta para
   // calcular el código esperado en cada verificación.
-  mfaEnabled     Boolean @default(false) @map("mfa_enabled")
-  mfaSecretEnc   String? @map("mfa_secret_enc")
+  mfaEnabled   Boolean @default(false) @map("mfa_enabled")
+  mfaSecretEnc String? @map("mfa_secret_enc")
 
-  mfaBackupCodes MfaBackupCode[]
+  mfaBackupCodes      MfaBackupCode[]
   mfaChallengeTickets MfaChallengeTicket[]
 
   tenantMemberships TenantMembership[]
@@ -335,28 +335,28 @@ model User {
   auditLogs                 AuditLog[]            @relation("AuditLogUser")
   workOrdersCreated         WorkOrder[]           @relation("WorkOrderCreatedBy")
   workOrderAssignments      WorkOrderAssignment[] @relation("WorkOrderAssignments")
-  employeeProfiles          Employee[]         @relation("EmployeeAccount")
-  employeesCreated          Employee[]         @relation("EmployeeCreatedBy")
-  employeesUpdated          Employee[]         @relation("EmployeeUpdatedBy")
-  diningAreasCreated        DiningArea[]       @relation("DiningAreaCreatedBy")
-  diningAreasUpdated        DiningArea[]       @relation("DiningAreaUpdatedBy")
-  restaurantTablesCreated   RestaurantTable[]  @relation("RestaurantTableCreatedBy")
-  restaurantTablesUpdated   RestaurantTable[]  @relation("RestaurantTableUpdatedBy")
-  dashboardsCreated         Dashboard[]        @relation("DashboardCreatedBy")
-  dashboardsUpdated         Dashboard[]        @relation("DashboardUpdatedBy")
-  widgetsCreated            Widget[]           @relation("WidgetCreatedBy")
-  widgetsUpdated            Widget[]           @relation("WidgetUpdatedBy")
-  suppliesCreated           Supply[]           @relation("SupplyCreatedBy")
-  suppliesUpdated           Supply[]           @relation("SupplyUpdatedBy")
-  supplyMovementsCreated    SupplyMovement[]   @relation("SupplyMovementCreatedBy")
+  employeeProfiles          Employee[]            @relation("EmployeeAccount")
+  employeesCreated          Employee[]            @relation("EmployeeCreatedBy")
+  employeesUpdated          Employee[]            @relation("EmployeeUpdatedBy")
+  diningAreasCreated        DiningArea[]          @relation("DiningAreaCreatedBy")
+  diningAreasUpdated        DiningArea[]          @relation("DiningAreaUpdatedBy")
+  restaurantTablesCreated   RestaurantTable[]     @relation("RestaurantTableCreatedBy")
+  restaurantTablesUpdated   RestaurantTable[]     @relation("RestaurantTableUpdatedBy")
+  dashboardsCreated         Dashboard[]           @relation("DashboardCreatedBy")
+  dashboardsUpdated         Dashboard[]           @relation("DashboardUpdatedBy")
+  widgetsCreated            Widget[]              @relation("WidgetCreatedBy")
+  widgetsUpdated            Widget[]              @relation("WidgetUpdatedBy")
+  suppliesCreated           Supply[]              @relation("SupplyCreatedBy")
+  suppliesUpdated           Supply[]              @relation("SupplyUpdatedBy")
+  supplyMovementsCreated    SupplyMovement[]      @relation("SupplyMovementCreatedBy")
 
   roleAssignments  UserRoleAssignment[]
   permissionGrants UserPermissionGrant[]
 
-  refreshTokens RefreshToken[]
-  oauthTickets  OAuthTicket[]
-  googleLinkTickets GoogleLinkTicket[]
-  invitationsSent TenantInvitation[] @relation("InvitationInvitedBy")
+  refreshTokens       RefreshToken[]
+  oauthTickets        OAuthTicket[]
+  googleLinkTickets   GoogleLinkTicket[]
+  invitationsSent     TenantInvitation[]   @relation("InvitationInvitedBy")
   passwordResetTokens PasswordResetToken[]
 
   managedBranches   Branch[]           @relation("BranchManager")
@@ -539,13 +539,16 @@ model PurchaseOrderItem {
   id              String  @id @default(uuid())
   purchaseOrderId String
   productId       String
+  // Variante que se compra. Ver OrderItem.variantId.
+  variantId       String?
   quantityOrdered Int
   unitCost        Decimal @db.Decimal(10, 2)
   tax             Decimal @default(0) @db.Decimal(10, 2)
   total           Decimal @db.Decimal(10, 2)
 
-  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  product       Product       @relation(fields: [productId], references: [id])
+  purchaseOrder PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product         @relation(fields: [productId], references: [id])
+  variant       ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@map("purchase_order_items")
 }
@@ -566,13 +569,16 @@ model PurchaseReceipt {
 }
 
 model PurchaseReceiptItem {
-  id                String @id @default(uuid())
+  id                String  @id @default(uuid())
   purchaseReceiptId String
   productId         String
+  // Variante que se recibe. Ver OrderItem.variantId.
+  variantId         String?
   quantityReceived  Int
 
   receipt PurchaseReceipt @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
   product Product         @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@map("purchase_receipt_items")
 }
@@ -582,6 +588,8 @@ model InventoryMovement {
   tenantId      String
   type          InventoryMovementType
   productId     String
+  // Variante contra la que se movió la existencia. Ver OrderItem.variantId.
+  variantId     String?
   branchId      String?
   quantity      Int
   referenceId   String?
@@ -590,10 +598,11 @@ model InventoryMovement {
   createdById   String?
   createdAt     DateTime              @default(now())
 
-  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product   Product @relation(fields: [productId], references: [id])
-  branch    Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  createdBy User?   @relation("MovementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id])
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  branch    Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdBy User?           @relation("MovementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@map("inventory_movements")
 }
@@ -619,14 +628,14 @@ model Category {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  parent    Category?  @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
-  children  Category[] @relation("CategoryToCategory")
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent    Category?       @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[]      @relation("CategoryToCategory")
   products  Product[]
   coupons   Coupon[]
   images    CategoryImage[]
-  createdBy User?      @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?      @relation("CategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdBy User?           @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?           @relation("CategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, slug])
   @@map("categories")
@@ -704,24 +713,24 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category             Category?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  images               ProductImage[]
-  orderItems           OrderItem[]
-  coupons              Coupon[]
-  branchInventory      BranchInventory[]
-  purchaseOrderItems   PurchaseOrderItem[]
-  purchaseReceiptItems PurchaseReceiptItem[]
-  inventoryMovements   InventoryMovement[]
-  quoteItems           ServiceQuoteItem[]
-  recipe               Recipe?
-  comboItems           ComboItem[]          @relation("ComboItems")
-  inCombos             ComboItem[]          @relation("ComboChildItems")
-  variants             ProductVariant[]
-  features             ProductFeature[]
+  tenant                  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category                Category?                @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  images                  ProductImage[]
+  orderItems              OrderItem[]
+  coupons                 Coupon[]
+  branchInventory         BranchInventory[]
+  purchaseOrderItems      PurchaseOrderItem[]
+  purchaseReceiptItems    PurchaseReceiptItem[]
+  inventoryMovements      InventoryMovement[]
+  quoteItems              ServiceQuoteItem[]
+  recipe                  Recipe?
+  comboItems              ComboItem[]              @relation("ComboItems")
+  inCombos                ComboItem[]              @relation("ComboChildItems")
+  variants                ProductVariant[]
+  features                ProductFeature[]
   storeWhatsappOrderItems StoreWhatsappOrderItem[]
-  createdBy            User?                @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy            User?                @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdBy               User?                    @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy               User?                    @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, sku])
   @@unique([tenantId, slug])
@@ -759,22 +768,27 @@ model ProductImage {
 // `cost`/`price` here are legacy columns kept during the expand phase of the
 // migration and are no longer the source of truth.
 model ProductVariant {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   productId      String
   name           String?
-  isDefault      Boolean  @default(false)
+  isDefault      Boolean @default(false)
   // Policy flag: does this variant carry inventory at all? Per-variant rather
   // than per-branch (unlike lowStockAlert, a genuinely branch-level reorder
   // point). Mirrors the legacy Product.trackInventory, kept in sync during expand.
-  trackInventory Boolean  @default(true)
-  cost           Decimal  @default(0) @db.Decimal(10, 2)
-  price          Decimal  @default(0) @db.Decimal(10, 2)
+  trackInventory Boolean @default(true)
+  cost           Decimal @default(0) @db.Decimal(10, 2)
+  price          Decimal @default(0) @db.Decimal(10, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  product         Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
-  branchInventory BranchInventory[]
+  product                 Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchInventory         BranchInventory[]
+  orderItems              OrderItem[]
+  inventoryMovements      InventoryMovement[]
+  purchaseOrderItems      PurchaseOrderItem[]
+  purchaseReceiptItems    PurchaseReceiptItem[]
+  storeWhatsappOrderItems StoreWhatsappOrderItem[]
 
   @@map("product_variants")
 }
@@ -813,8 +827,8 @@ model MeasurementUnit {
   isBase     Boolean      @default(false)
   isSystem   Boolean      @default(true)
 
-  baseSupplies      Supply[]           @relation("SupplyBaseUnit")
-  inventorySupplies Supply[]           @relation("SupplyInventoryUnit")
+  baseSupplies      Supply[]            @relation("SupplyBaseUnit")
+  inventorySupplies Supply[]            @relation("SupplyInventoryUnit")
   allowedInSupplies SupplyAllowedUnit[]
   recipeItems       RecipeItem[]
 
@@ -867,15 +881,15 @@ model Supply {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  baseUnit      MeasurementUnit?   @relation("SupplyBaseUnit", fields: [baseUnitId], references: [id], onDelete: SetNull)
-  inventoryUnit MeasurementUnit?   @relation("SupplyInventoryUnit", fields: [inventoryUnitId], references: [id], onDelete: SetNull)
+  baseUnit      MeasurementUnit?    @relation("SupplyBaseUnit", fields: [baseUnitId], references: [id], onDelete: SetNull)
+  inventoryUnit MeasurementUnit?    @relation("SupplyInventoryUnit", fields: [inventoryUnitId], references: [id], onDelete: SetNull)
   allowedUnits  SupplyAllowedUnit[]
-  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch        Branch?            @relation("BranchSupplies", fields: [branchId], references: [id], onDelete: SetNull)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch?             @relation("BranchSupplies", fields: [branchId], references: [id], onDelete: SetNull)
   recipeItems   RecipeItem[]
   movements     SupplyMovement[]
-  createdBy     User?              @relation("SupplyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy     User?              @relation("SupplyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdBy     User?               @relation("SupplyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?               @relation("SupplyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, sku])
   @@map("supplies")
@@ -1155,12 +1169,12 @@ model DiningArea {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch    Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  createdBy User?   @relation("DiningAreaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?   @relation("DiningAreaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("DiningAreaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("DiningAreaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
-  tables    RestaurantTable[]
+  tables RestaurantTable[]
 
   @@unique([branchId, name])
   @@index([tenantId, branchId, isActive])
@@ -1227,11 +1241,11 @@ model RestaurantTable {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch    Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  area      DiningArea  @relation(fields: [areaId], references: [id], onDelete: Cascade)
-  createdBy User?       @relation("RestaurantTableCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?       @relation("RestaurantTableUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  area         DiningArea    @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  createdBy    User?         @relation("RestaurantTableCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy    User?         @relation("RestaurantTableUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   diningOrders DiningOrder[]
 
   @@unique([branchId, name])
@@ -1245,7 +1259,7 @@ model DiningOrder {
   branchId    String
   tableId     String?
   waiterId    String
-  serviceType DiningServiceType @default(DINE_IN)  @map("service_type")
+  serviceType DiningServiceType @default(DINE_IN) @map("service_type")
   reference   String?
   status      DiningOrderStatus @default(OPEN)
   openedAt    DateTime          @default(now())
@@ -1259,11 +1273,11 @@ model DiningOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch        Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  table         RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  waiter        Employee         @relation("DiningOrderWaiter", fields: [waiterId], references: [id])
-  order         Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  table         RestaurantTable?  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  waiter        Employee          @relation("DiningOrderWaiter", fields: [waiterId], references: [id])
+  order         Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
   items         DiningOrderItem[]
   kitchenRounds KitchenRound[]
 
@@ -1288,7 +1302,7 @@ model KitchenRound {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order DiningOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order DiningOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items DiningOrderItem[]
 
   @@index([orderId])
@@ -1296,12 +1310,12 @@ model KitchenRound {
 }
 
 model DiningOrderItem {
-  id          String      @id @default(uuid())
+  id          String  @id @default(uuid())
   orderId     String
   productId   String?
   productName String
-  unitPrice   Decimal     @db.Decimal(10, 2)
-  quantity    Int         @default(1)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  quantity    Int     @default(1)
   notes       String?
 
   // Momento en que el ítem se envió a cocina/caja. NULL = pendiente de envío
@@ -1311,7 +1325,7 @@ model DiningOrderItem {
 
   // FK a la ronda de cocina que lo envió. NULL para ítems pre-migración o cuando
   // kitchen está deshabilitado.
-  kitchenRoundId String?       @map("kitchen_round_id")
+  kitchenRoundId String? @map("kitchen_round_id")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1352,13 +1366,13 @@ model Order {
   estimatedDeliveryDate DateTime?
   deliveredAt           DateTime?
 
-  orderOrigin            OrderOrigin?
-  kitchenStatus          KitchenOrderStatus?
-  kitchenStartedAt       DateTime?
-  kitchenReadyAt         DateTime?
-  kitchenPausedAt        DateTime?
-  kitchenRejectedAt      DateTime?
-  kitchenRejectedById    String?
+  orderOrigin             OrderOrigin?
+  kitchenStatus           KitchenOrderStatus?
+  kitchenStartedAt        DateTime?
+  kitchenReadyAt          DateTime?
+  kitchenPausedAt         DateTime?
+  kitchenRejectedAt       DateTime?
+  kitchenRejectedById     String?
   kitchenRejectionComment String?
 
   cancelledAt        DateTime?
@@ -1394,6 +1408,10 @@ model OrderItem {
   orderId     String
   itemType    OrderItemType @default(PRODUCT)
   productId   String?
+  // Variante vendida. Nullable durante la fase expand: las líneas anteriores a
+  // la migración apuntan a la default por backfill, y las nuevas la traen
+  // siempre. `SetNull` para que borrar una variante no borre el historial.
+  variantId   String?
   serviceId   String?
   name        String
   description String?
@@ -1406,9 +1424,10 @@ model OrderItem {
   total       Decimal       @db.Decimal(10, 2)
   createdAt   DateTime      @default(now())
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product? @relation(fields: [productId], references: [id])
-  service Service? @relation(fields: [serviceId], references: [id])
+  order       Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product?          @relation(fields: [productId], references: [id])
+  variant     ProductVariant?   @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  service     Service?          @relation(fields: [serviceId], references: [id])
   refundItems OrderRefundItem[]
 
   @@map("order_items")
@@ -1442,8 +1461,8 @@ model Branch {
   // (everyone sees every active order). Persisted infra for a future filter; not
   // enforced yet. See DiningOrdersService.resolveVisibilityWhere.
   restaurantVisibilityMode RestaurantVisibilityMode @default(SHARED) @map("restaurant_visibility_mode")
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
 
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   manager            User?               @relation("BranchManager", fields: [managerId], references: [id], onDelete: SetNull)
@@ -1454,8 +1473,8 @@ model Branch {
   inventoryMovements InventoryMovement[]
   cashSessions       CashSession[]
   purchaseOrders     PurchaseOrder[]
-  supplies           Supply[]           @relation("BranchSupplies")
-  supplyMovements    SupplyMovement[]   @relation("BranchSupplyMovements")
+  supplies           Supply[]            @relation("BranchSupplies")
+  supplyMovements    SupplyMovement[]    @relation("BranchSupplyMovements")
   printerConfigs     PrinterConfig[]
   devices            Device[]
   employeeBranches   EmployeeBranch[]
@@ -1497,12 +1516,12 @@ model BranchMembership {
 // in place and still written to, so this change stays revertible; the contract
 // phase drops them once all reads come from here.
 model BranchInventory {
-  branchId  String
+  branchId      String
   // Denormalized parent pointer: no longer unique per branch (a product may hold
   // one row per variant), kept indexed for product-keyed lookups.
-  productId String
-  variantId String
-  stock     Int      @default(0)
+  productId     String
+  variantId     String
+  stock         Int      @default(0)
   // Effective commercial values for this branch+variant. Nullable during expand
   // so a missing backfill is visible rather than silently reading as 0.
   cost          Decimal? @db.Decimal(10, 2)
@@ -1513,7 +1532,7 @@ model BranchInventory {
   // Branch-level reorder point (a legitimately per-branch number, unlike the
   // per-variant trackInventory policy flag).
   lowStockAlert Int      @default(5)
-  updatedAt DateTime @updatedAt
+  updatedAt     DateTime @updatedAt
 
   branch  Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
   product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -1569,9 +1588,9 @@ model OrderRefund {
   createdById      String?
   createdAt        DateTime @default(now())
 
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order     Order  @relation(fields: [orderId], references: [id])
-  createdBy User?  @relation("RefundCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order     Order             @relation(fields: [orderId], references: [id])
+  createdBy User?             @relation("RefundCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   items     OrderRefundItem[]
 
   @@index([tenantId, orderId])
@@ -1583,7 +1602,7 @@ model OrderRefund {
 // quantity per orderItem (summed across refunds) must never exceed the quantity
 // originally sold — that invariant is what stops a line being restored twice.
 model OrderRefundItem {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   refundId    String
   orderItemId String
   productId   String?
@@ -1709,51 +1728,51 @@ model CashRegister {
 }
 
 model CashSession {
-  id                 String            @id @default(uuid())
-  tenantId           String
-  branchId           String?
+  id                     String            @id @default(uuid())
+  tenantId               String
+  branchId               String?
   /// Caja física a la que pertenece la sesión.
-  cashRegisterId     String?
-  status             CashSessionStatus @default(ABIERTA)
-  exchangeRateUsdMxn Decimal           @default(1) @db.Decimal(10, 4)
-  openingAmount      Decimal           @db.Decimal(10, 2)
-  openingAmountUsd   Decimal           @default(0) @db.Decimal(10, 2)
+  cashRegisterId         String?
+  status                 CashSessionStatus @default(ABIERTA)
+  exchangeRateUsdMxn     Decimal           @default(1) @db.Decimal(10, 4)
+  openingAmount          Decimal           @db.Decimal(10, 2)
+  openingAmountUsd       Decimal           @default(0) @db.Decimal(10, 2)
   /// Efectivo esperado calculado al cerrar (no lo contado: eso es `cashCounted`).
-  expectedAmount     Decimal?          @db.Decimal(10, 2)
-  cashCounted        Decimal?          @db.Decimal(10, 2)
-  cashCountedUsd     Decimal?          @db.Decimal(10, 2)
-  difference         Decimal?          @db.Decimal(10, 2)
-  differenceUsd      Decimal?          @db.Decimal(10, 2)
+  expectedAmount         Decimal?          @db.Decimal(10, 2)
+  cashCounted            Decimal?          @db.Decimal(10, 2)
+  cashCountedUsd         Decimal?          @db.Decimal(10, 2)
+  difference             Decimal?          @db.Decimal(10, 2)
+  differenceUsd          Decimal?          @db.Decimal(10, 2)
   /// Justificación de la diferencia del cierre. Obligatoria cuando supera el
   /// umbral del tenant — antes una caja podía cerrar descuadrada sin explicación
   /// (docs/AUDITORIA-CAJA.md, CASH-006).
-  differenceReason   String?
+  differenceReason       String?
   /// Efectivo que permanece en el cajón tras el retiro del cierre. Encadena con
   /// la apertura siguiente: `fondo restante = contado - retiro` (CASH-005).
-  remainingFund      Decimal?          @db.Decimal(10, 2)
-  remainingFundUsd   Decimal?          @db.Decimal(10, 2)
-  notes              String?
-  openedById         String?
-  closedById         String?
-  authorizedById     String?
+  remainingFund          Decimal?          @db.Decimal(10, 2)
+  remainingFundUsd       Decimal?          @db.Decimal(10, 2)
+  notes                  String?
+  openedById             String?
+  closedById             String?
+  authorizedById         String?
   /// Empleado que autorizó por PIN desde el POS. Es un `Employee` y no un
   /// `User` porque un operador con PIN no necesita cuenta del sistema; para la
   /// autorización con contraseña del Admin Web se sigue usando `authorizedById`.
-  authorizedByEmployeeId String? @map("authorized_by_employee_id")
-  openedAt           DateTime          @default(now())
-  closedAt           DateTime?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  authorizedByEmployeeId String?           @map("authorized_by_employee_id")
+  openedAt               DateTime          @default(now())
+  closedAt               DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
-  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch       Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  openedBy     User?          @relation("CashSessionOpenedBy", fields: [openedById], references: [id], onDelete: SetNull)
-  closedBy     User?          @relation("CashSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
-  authorizedBy User?          @relation("CashSessionAuthorizedBy", fields: [authorizedById], references: [id], onDelete: SetNull)
-  cashRegister CashRegister?  @relation(fields: [cashRegisterId], references: [id], onDelete: Restrict)
-  authorizedByEmployee Employee? @relation("CashSessionAuthorizedByEmployee", fields: [authorizedByEmployeeId], references: [id], onDelete: SetNull)
-  movements    CashMovement[]
-  counts       CashCount[]
+  tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch               Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  openedBy             User?          @relation("CashSessionOpenedBy", fields: [openedById], references: [id], onDelete: SetNull)
+  closedBy             User?          @relation("CashSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  authorizedBy         User?          @relation("CashSessionAuthorizedBy", fields: [authorizedById], references: [id], onDelete: SetNull)
+  cashRegister         CashRegister?  @relation(fields: [cashRegisterId], references: [id], onDelete: Restrict)
+  authorizedByEmployee Employee?      @relation("CashSessionAuthorizedByEmployee", fields: [authorizedByEmployeeId], references: [id], onDelete: SetNull)
+  movements            CashMovement[]
+  counts               CashCount[]
 
   @@map("cash_sessions")
 }
@@ -2017,29 +2036,29 @@ model Employee {
   // Operative PIN login (comandera). Deterministic hash (sha256 + pepper) so it
   // can be looked up + kept unique per tenant. `roleId` sources the operator's
   // permissions from the RBAC roles table without needing a User account.
-  pinHash        String?        @map("pin_hash")
-  roleId         String?        @map("role_id")
+  pinHash String? @map("pin_hash")
+  roleId  String? @map("role_id")
 
   // Cuenta de back-office de esta misma persona, si la tiene. Opcional a
   // propósito: la mayoría del personal opera solo con PIN y nunca necesita
   // entrar al panel. Sin este vínculo, empleado y usuario eran dos altas
   // manuales sin relación, y sus datos podían divergir sin que nadie lo notara
   // (mismo patrón que `hr.employee.user_id` en Odoo).
-  userId         String?        @map("user_id")
+  userId String? @map("user_id")
 
   createdById String?
   updatedById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  role         Role?            @relation("EmployeeRole", fields: [roleId], references: [id], onDelete: SetNull)
-  branches     EmployeeBranch[]
-  diningOrders DiningOrder[]    @relation("DiningOrderWaiter")
-  cashSessionsAuthorized CashSession[] @relation("CashSessionAuthorizedByEmployee")
-  createdBy    User?            @relation("EmployeeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy    User?            @relation("EmployeeUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  user         User?            @relation("EmployeeAccount", fields: [userId], references: [id], onDelete: SetNull)
+  tenant                 Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role                   Role?            @relation("EmployeeRole", fields: [roleId], references: [id], onDelete: SetNull)
+  branches               EmployeeBranch[]
+  diningOrders           DiningOrder[]    @relation("DiningOrderWaiter")
+  cashSessionsAuthorized CashSession[]    @relation("CashSessionAuthorizedByEmployee")
+  createdBy              User?            @relation("EmployeeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy              User?            @relation("EmployeeUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  user                   User?            @relation("EmployeeAccount", fields: [userId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, employeeNumber])
   @@unique([tenantId, email])
@@ -2336,6 +2355,8 @@ model StoreWhatsappOrderItem {
   id        String   @id @default(uuid())
   orderId   String
   productId String?
+  // Variante pedida. Ver OrderItem.variantId.
+  variantId String?
   name      String
   price     Decimal  @db.Decimal(10, 2)
   quantity  Int
@@ -2344,6 +2365,7 @@ model StoreWhatsappOrderItem {
 
   order   StoreWhatsappOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variant ProductVariant?    @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@map("store_whatsapp_order_items")
 }
@@ -2555,22 +2577,22 @@ enum PrinterConnection {
 }
 
 model PrinterConfig {
-  id             String            @id @default(uuid())
-  tenantId       String
-  branchId       String?
-  name           String
-  type           PrinterType       @default(TICKET)
-  connectionType PrinterConnection @default(NETWORK)
+  id               String            @id @default(uuid())
+  tenantId         String
+  branchId         String?
+  name             String
+  type             PrinterType       @default(TICKET)
+  connectionType   PrinterConnection @default(NETWORK)
   ipAddress        String?
   port             Int?
   usbPath          String?
   bluetoothAddress String? // MAC address (00:11:22:33:44:55) o puerto RFCOMM (/dev/rfcomm0, COM3)
   systemName       String?
-  paperWidth     Int?
-  isDefault      Boolean           @default(false)
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  paperWidth       Int?
+  isDefault        Boolean           @default(false)
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
@@ -2618,14 +2640,14 @@ model AiUsageEvent {
   userId    String?
   requestId String  @unique
 
-  featureKey     String
-  promptVersion  Int
-  schemaVersion  Int
+  featureKey    String
+  promptVersion Int
+  schemaVersion Int
 
-  providerId      String
-  modelKey        String
-  attemptNumber   Int      @default(1)
-  degradations    String[] @default([])
+  providerId    String
+  modelKey      String
+  attemptNumber Int      @default(1)
+  degradations  String[] @default([])
 
   inputTokens  Int?
   outputTokens Int?
@@ -2661,15 +2683,15 @@ model AiUsageEvent {
 // requiere escanear ai_usage_events. Se incrementa en la misma transacción
 // que se escribe el evento (ver AiUsageRecorder).
 model AiUsageCounter {
-  id       String @id @default(uuid())
-  tenantId String
+  id         String @id @default(uuid())
+  tenantId   String
   // Formato 'YYYY-MM', mes calendario en UTC.
   period     String
   featureKey String
 
   invocationCount     Int    @default(0)
   successCount        Int    @default(0)
-  totalTokens          Int    @default(0)
+  totalTokens         Int    @default(0)
   estimatedCostMicros BigInt @default(0)
 
   updatedAt DateTime @updatedAt
@@ -2679,7 +2701,6 @@ model AiUsageCounter {
   @@unique([tenantId, period, featureKey])
   @@map("ai_usage_counters")
 }
-
 
 /// Invitación para que una persona se una a una empresa.
 ///
