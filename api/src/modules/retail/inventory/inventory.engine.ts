@@ -95,6 +95,25 @@ export interface ProductStockDelta {
   branchId?: string | null;
 }
 
+/**
+ * Resultado de aplicar un delta de producto.
+ *
+ * Lleva la llave REALMENTE usada para que el llamador escriba su asiento contra
+ * ella. Antes solo devolvia un booleano, asi que el movimiento se escribia con
+ * el `variantId` que traia la peticion: cuando el llamador no nombraba ninguna
+ * —el caso normal de un producto de una sola presentacion— el motor resolvia la
+ * variante para mover la existencia pero el ledger la guardaba en null, y el
+ * historial por variante quedaba incompleto justo donde mas se consulta.
+ */
+export interface ProductStockDeltaResult {
+  /** false = el guard rechazo la resta por existencia insuficiente. */
+  applied: boolean;
+  /** Variante contra la que se movio; null en el camino legacy. */
+  variantId: string | null;
+  /** Sucursal contra la que se movio; null en el camino legacy. */
+  branchId: string | null;
+}
+
 /** Delta a aplicar sobre existencia de insumo. */
 export interface SupplyStockDelta {
   supplyId: string;
@@ -173,7 +192,7 @@ export class InventoryEngine {
   async applyProductStockDelta(
     tx: Prisma.TransactionClient,
     { productId, tenantId, delta, guardInsufficient, variantId, branchId }: ProductStockDelta,
-  ): Promise<boolean> {
+  ): Promise<ProductStockDeltaResult> {
     // La variante explícita y la sucursal se resuelven por separado: exigir las
     // dos para respetar la variante descartaba la elegida siempre que el token
     // no traía sucursal, que es el caso mayoritario.
@@ -187,7 +206,7 @@ export class InventoryEngine {
           where: { id: productId, tenantId, stock: { gte: -delta } },
           data: { stock: { increment: delta } },
         });
-        return res.count > 0;
+        return { applied: res.count > 0, variantId: null, branchId: null };
       }
 
       const res = await tx.product.updateMany({
@@ -196,7 +215,7 @@ export class InventoryEngine {
       });
       // 0 filas = el producto no es de este tenant (o no existe): no hay nada
       // que mover y el llamador debe tratarlo como fallo, no como éxito silencioso.
-      return res.count > 0;
+      return { applied: res.count > 0, variantId: null, branchId: null };
     }
 
     await this.ensureBranchInventoryRow(tx, productId, tenantId, target.variantId, target.branchId);
@@ -206,7 +225,7 @@ export class InventoryEngine {
         where: { ...target, stock: { gte: -delta } },
         data: { stock: { increment: delta } },
       });
-      if (res.count === 0) return false;
+      if (res.count === 0) return { applied: false, ...target };
     } else {
       await tx.branchInventory.updateMany({
         where: target,
@@ -215,7 +234,7 @@ export class InventoryEngine {
     }
 
     await this.mirrorLegacyProductStock(tx, productId, tenantId, delta);
-    return true;
+    return { applied: true, ...target };
   }
 
   /**

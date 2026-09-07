@@ -905,20 +905,23 @@ export class ProductsService {
     // TOCTOU: una venta concurrente entre la lectura y la escritura podía dejar
     // el stock en negativo.
     const updated = await this.prisma.$transaction(async (tx) => {
-      const applied = await this.inventoryEngine.applyProductStockDelta(tx, {
+      const movida = await this.inventoryEngine.applyProductStockDelta(tx, {
         productId: id,
         tenantId,
         delta: quantity,
         guardInsufficient: quantity < 0,
         branchId,
       });
-      if (!applied) throw new BadRequestException('Insufficient stock');
+      if (!movida.applied) throw new BadRequestException('Insufficient stock');
 
       if (quantity !== 0) {
         await this.inventoryEngine.recordProductMovement(tx, {
           tenantId,
           type: 'AJUSTE',
           productId: id,
+          // La variante resuelta: sin esto el ajuste de un producto de una sola
+          // presentacion quedaba en el ledger sin decir sobre cual cayo.
+          variantId: movida.variantId,
           quantity,
           referenceId: id,
           referenceType: 'PRODUCT_ADJUST',
@@ -976,7 +979,7 @@ export class ProductsService {
     );
 
     await this.prisma.$transaction(async (tx) => {
-      const applied = await this.inventoryEngine.applyProductStockDelta(tx, {
+      const movida = await this.inventoryEngine.applyProductStockDelta(tx, {
         productId,
         tenantId,
         delta: quantity,
@@ -984,7 +987,7 @@ export class ProductsService {
         branchId,
         variantId,
       });
-      if (!applied) throw new BadRequestException('Insufficient stock');
+      if (!movida.applied) throw new BadRequestException('Insufficient stock');
 
       if (quantity !== 0) {
         await this.inventoryEngine.recordProductMovement(tx, {

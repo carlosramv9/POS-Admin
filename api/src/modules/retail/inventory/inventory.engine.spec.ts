@@ -270,7 +270,7 @@ describe('InventoryEngine', () => {
     it('delta 0 → escribe increment 0 (preserva bump de updatedAt) y devuelve true', async () => {
       const tx = makeTx();
       const ok = await engine.applyProductStockDelta(tx as never, { productId: 'p1', tenantId: 't1', delta: 0 });
-      expect(ok).toBe(true);
+      expect(ok.applied).toBe(true);
       // Sin corto-circuito: siempre se emite el UPDATE (increment 0) para conservar
       // el comportamiento observable de una escritura de stock (updatedAt).
       expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
@@ -292,7 +292,7 @@ describe('InventoryEngine', () => {
       const ok = await engine.applyProductStockDelta(tx as never, {
         productId: 'p1', tenantId: 't1', delta: -5, guardInsufficient: true,
       });
-      expect(ok).toBe(true);
+      expect(ok.applied).toBe(true);
       // El guard contra sobreventa vive en la fila de (sucursal, variante).
       expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
         where: { ...TARGET, stock: { gte: 5 } },
@@ -317,7 +317,7 @@ describe('InventoryEngine', () => {
         productId: 'p1', tenantId: 't1', delta: -5, guardInsufficient: true,
       });
 
-      expect(ok).toBe(true);
+      expect(ok.applied).toBe(true);
       expect(tx.product.updateMany).toHaveBeenLastCalledWith({
         where: { id: 'p1', tenantId: 't1' },
         data: { stock: 0 },
@@ -330,7 +330,7 @@ describe('InventoryEngine', () => {
       const ok = await engine.applyProductStockDelta(tx as never, {
         productId: 'p1', tenantId: 't1', delta: -5, guardInsufficient: true,
       });
-      expect(ok).toBe(false);
+      expect(ok.applied).toBe(false);
       // El rechazo corta antes del espejo: `Product.stock` no se mueve.
       expect(tx.product.update).not.toHaveBeenCalled();
       expect(tx.product.updateMany).not.toHaveBeenCalled();
@@ -339,7 +339,7 @@ describe('InventoryEngine', () => {
     it('suma sin guard → increment directo en la fila y en el espejo', async () => {
       const tx = makeTx();
       const ok = await engine.applyProductStockDelta(tx as never, { productId: 'p1', tenantId: 't1', delta: 4 });
-      expect(ok).toBe(true);
+      expect(ok.applied).toBe(true);
       expect(tx.branchInventory.updateMany).toHaveBeenCalledWith({
         where: TARGET,
         data: { stock: { increment: 4 } },
@@ -360,7 +360,7 @@ describe('InventoryEngine', () => {
       const ok = await engine.applyProductStockDelta(tx as never, {
         productId: 'p1', tenantId: 't1', delta: -5, guardInsufficient: true,
       });
-      expect(ok).toBe(true);
+      expect(ok.applied).toBe(true);
       expect(tx.product.updateMany).toHaveBeenCalledWith({
         where: { id: 'p1', tenantId: 't1', stock: { gte: 5 } },
         data: { stock: { increment: -5 } },
@@ -375,7 +375,7 @@ describe('InventoryEngine', () => {
       tx.branch.findFirst.mockResolvedValue(null);
 
       const ok = await engine.applyProductStockDelta(tx as never, { productId: 'p1', tenantId: 't1', delta: 4 });
-      expect(ok).toBe(true);
+      expect(ok.applied).toBe(true);
       expect(tx.product.updateMany).toHaveBeenCalledWith({
         where: { id: 'p1', tenantId: 't1' },
         data: { stock: { increment: 4 } },
@@ -392,7 +392,7 @@ describe('InventoryEngine', () => {
       const ok = await engine.applyProductStockDelta(tx as never, {
         productId: 'p1', tenantId: 't1', delta: -5, guardInsufficient: true,
       });
-      expect(ok).toBe(false);
+      expect(ok.applied).toBe(false);
       expect(tx.product.update).not.toHaveBeenCalled();
     });
   });
@@ -401,6 +401,8 @@ describe('InventoryEngine', () => {
     it('resta con guard insuficiente → false', async () => {
       const tx = makeTx();
       tx.supply.updateMany.mockResolvedValue({ count: 0 });
+      // Los insumos no tienen variante: este primitivo sigue devolviendo un
+      // booleano, a diferencia del de producto.
       const ok = await engine.applySupplyStockDelta(tx as never, {
         supplyId: 's1', tenantId: 't1', delta: -3, guardInsufficient: true,
       });

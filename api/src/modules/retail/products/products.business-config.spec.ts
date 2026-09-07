@@ -35,7 +35,7 @@ describe('ProductsService — BR-02 recipe gating', () => {
   const mockR2 = { upload: jest.fn(), delete: jest.fn(), buildKey: jest.fn() };
   const mockBusinessConfig = { hasFeature: jest.fn() };
   const mockInventoryEngine = {
-    applyProductStockDelta: jest.fn().mockResolvedValue(true),
+    applyProductStockDelta: jest.fn().mockResolvedValue({ applied: true, variantId: 'v-p1', branchId: 'b1' }),
     recordProductMovement: jest.fn().mockResolvedValue(undefined),
   };
   const mockAiUsageRecorder = { recordOutcome: jest.fn().mockResolvedValue(undefined) };

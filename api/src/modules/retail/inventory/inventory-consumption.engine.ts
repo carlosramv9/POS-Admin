@@ -151,7 +151,7 @@ export class InventoryConsumptionEngine {
     for (const effect of effects.products.values()) {
       // El engine aplica el guard sobre la fila de (sucursal, variante) —
       // la fuente de verdad — y espeja el movimiento en `Product.stock`.
-      const applied = await this.inventory.applyProductStockDelta(tx, {
+      const movida = await this.inventory.applyProductStockDelta(tx, {
         productId: effect.productId,
         tenantId: ctx.tenantId,
         delta: -effect.quantity,
@@ -159,7 +159,7 @@ export class InventoryConsumptionEngine {
         branchId: ctx.branchId,
         variantId: effect.variantId,
       });
-      if (!applied) {
+      if (!movida.applied) {
         throw new BadRequestException(
           `Stock insuficiente para "${effect.productName}" al procesar la venta`,
         );
@@ -169,7 +169,10 @@ export class InventoryConsumptionEngine {
           tenantId: ctx.tenantId,
           type: 'VENTA',
           productId: effect.productId,
-          variantId: effect.variantId,
+          // La variante RESUELTA, no la que pidio el llamador: un producto de
+          // una sola presentacion se vende sin nombrarla y el asiento debe
+          // apuntar igualmente a ella.
+          variantId: movida.variantId,
           branchId: ctx.branchId,
           quantity: effect.quantity,
           referenceId: ctx.referenceId,
@@ -219,7 +222,7 @@ export class InventoryConsumptionEngine {
 
     for (const effect of effects.products.values()) {
       // Sin guard: una restauración nunca falla por disponibilidad.
-      await this.inventory.applyProductStockDelta(tx, {
+      const devuelta = await this.inventory.applyProductStockDelta(tx, {
         productId: effect.productId,
         tenantId: ctx.tenantId,
         delta: effect.quantity,
@@ -231,7 +234,7 @@ export class InventoryConsumptionEngine {
           tenantId: ctx.tenantId,
           type: 'DEVOLUCION',
           productId: effect.productId,
-          variantId: effect.variantId,
+          variantId: devuelta.variantId,
           branchId: ctx.branchId,
           quantity: effect.quantity,
           referenceId: ctx.referenceId,

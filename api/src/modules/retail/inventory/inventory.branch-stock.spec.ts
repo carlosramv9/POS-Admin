@@ -290,6 +290,24 @@ describe('InventoryConsumptionEngine — BranchInventory no negativo (P1-04)', (
       expect(rows.get('b1:v-talla-m')).toBe(5); // 10 - 5, agregado
     });
 
+    it('el asiento del ledger guarda la variante RESUELTA, no la que pidió el llamador', async () => {
+      // Un producto de una sola presentación se vende sin nombrarla. El motor la
+      // resuelve para mover la existencia, y el movimiento tiene que apuntar a
+      // ella: antes se escribía el `variantId` de la petición (null) y el
+      // historial por variante quedaba incompleto justo donde más se consulta.
+      const { tx } = makeTx({ p1: simple('p1', 100) }, {}, { 'b1:v-p1': 8 });
+      await engine().consume(
+        tx as never,
+        [{ productId: 'p1', quantity: 2, itemType: 'PRODUCT' }],
+        ctx('b1'),
+      );
+      expect(tx.inventoryMovement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ type: 'VENTA', variantId: 'v-p1' }),
+        }),
+      );
+    });
+
     it('sin variante en la línea se sigue usando la default', async () => {
       const { tx, rows } = makeTx({ p1: simple('p1', 100) }, {}, { 'b1:v-p1': 8, 'b1:v-talla-m': 10 });
       await engine().consume(

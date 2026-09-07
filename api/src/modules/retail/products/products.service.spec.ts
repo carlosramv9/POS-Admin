@@ -76,7 +76,7 @@ describe('ProductsService', () => {
   const mockR2Service = { upload: jest.fn(), delete: jest.fn(), buildKey: jest.fn().mockReturnValue('key') };
   const mockBusinessConfig = { hasFeature: jest.fn().mockResolvedValue(false) };
   const mockInventoryEngine = {
-    applyProductStockDelta: jest.fn().mockResolvedValue(true),
+    applyProductStockDelta: jest.fn().mockResolvedValue({ applied: true, variantId: 'v-p1', branchId: 'b1' }),
     recordProductMovement: jest.fn().mockResolvedValue(undefined),
   };
   const mockAiUsageRecorder = { recordOutcome: jest.fn().mockResolvedValue(undefined) };

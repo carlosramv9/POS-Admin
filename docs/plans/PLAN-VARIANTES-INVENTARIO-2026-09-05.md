@@ -4,7 +4,7 @@
 **Alcance:** `orbix-admin/` · `api/src/modules/retail/products`, `retail/inventory`, `retail/purchases`, `core/branches`, `core/store` · `apps/pos-web/` · `web/`
 **Origen:** auditoría del módulo de productos (variantes), 2026-09-05
 **Decisión de referencia:** ADR-0030 *Variante por defecto obligatoria como unidad vendible (Orbix)* — aceptada 2026-08-17, entregada en fase *expand* 2026-08-18, *contract* pendiente
-**Estado del plan:** Fases 0, 1 y 2 implementadas (2026-09-05/07). Fase 3 (contract) pendiente.
+**Estado del plan:** Fases 0, 1 y 2 implementadas (2026-09-05/07). Fase 3 evaluada y **bloqueada** — ver §Fase 3.
 
 > Convenciones: **Confirmado** = respaldado por código citado en la auditoría. **Bloqueante** = no se puede desplegar la fase siguiente sin esto. **S/M/L** = tamaño relativo de la entrega.
 
@@ -290,17 +290,76 @@ Tests nuevos:
 
 ---
 
-## Fase 3 — Contract (irreversible)
+## Fase 3 — Contract (irreversible) — ⛔ NO EJECUTADA: criterios no cumplidos
 
-No antes de dos semanas de fase 2 estable en producción.
+Evaluada el 2026-09-07 contra la base y el código reales. **Dos partes del plan
+original estaban mal**, y se corrigen aquí antes de que nadie las ejecute.
 
-- `variantId` pasa a `NOT NULL` en las cinco tablas de la fase 1.
-- Se retiran: `products.stock`, `product_variants.cost`, `product_variants.price`.
-- Se elimina `mirrorLegacyProductStock` (`inventory.engine.ts:222`) y el camino legacy de `applyProductStockDelta`.
-- `attachVariantStock` (`products.service.ts:356`) pierde el fallback a `rest.stock`: `branch_inventory` queda como única verdad.
-- El campo `stock` del `CreateProductDto` se documenta como "existencia inicial en la sucursal del alta", no como columna del producto.
+### 3.1 `variantId` a `NOT NULL` — cancelado, era un error de diseño
 
-**Criterio de entrada:** cero filas con `variantId IS NULL` en las cinco tablas, y ningún acceso a `products.stock` fuera del código que se retira en esta fase.
+El plan pedía cero filas con `variantId IS NULL` en las cinco tablas. Es
+**imposible por diseño**, no un problema de datos que se limpie:
+
+| Tabla | Nulos | Por qué |
+|---|---|---|
+| `order_items` | 7 | 6 son líneas de SERVICIO, sin `productId`. Un servicio no tiene producto y por tanto no tiene variante. |
+| `store_whatsapp_order_items` | 1 | Sin `productId`: el producto se borró y la FK lo puso a null. |
+| `inventory_movements` | 1 | Un asiento escrito antes del arreglo de 3.3. |
+| `purchase_order_items` | 0 | — |
+| `purchase_receipt_items` | 0 | — |
+
+Y hay una contradicción más profunda: la FK es `ON DELETE SET NULL` **a
+propósito**, para que borrar una variante no destruya el historial de ventas ni
+el ledger. `NOT NULL` y `SET NULL` no pueden coexistir: en cuanto alguien borre
+una presentación, la base rechazaría la operación o rompería la restricción.
+
+**Corrección:** `variantId` se queda NULLABLE en las cinco tablas,
+permanentemente. Null significa exactamente dos cosas legítimas —"línea sin
+producto" e "histórico anterior al cambio"— y los lectores deben tratarlo así.
+Tampoco cabe un `CHECK (productId IS NULL OR variantId IS NOT NULL)`: lo
+violaría el propio `SET NULL` al borrar una variante.
+
+### 3.2 Retirar `products.stock` — pendiente, criterio no cumplido
+
+Este sí es el objetivo real de la fase contract, y sigue bloqueado. Lo leen o lo
+escriben, fuera del código que se retiraría:
+
+- `products-import.service.ts:325,330` — siembra las filas de sucursal desde él.
+- `core/cash-sessions/cash-sessions.service.ts:671` — lo incrementa.
+- `core/store/store.service.ts:19` — lo proyecta para la tienda.
+- `retail/inventory/inventory-consumption.engine.ts:97` — lo carga en el árbol de expansión.
+- `products.service.ts:232,935` — lo pone a 0 para no-SIMPLE y lo lee para el audit.
+- `web/src/services/retail/product-service.ts` y `apps/pos-web/src/stores/cart-store.ts` — lo leen como existencia del producto.
+
+Cada uno necesita migrarse a `branch_inventory` antes de poder soltar la columna.
+Es trabajo real, no una limpieza.
+
+### 3.3 Lo que sí se corrigió al evaluar
+
+El asiento del ledger guardaba el `variantId` **de la petición**, no el que el
+motor resolvía. Un producto de una sola presentación se vende sin nombrarla, así
+que el movimiento quedaba con `variantId` null aunque la existencia sí se movía
+contra la variante correcta: el historial por variante salía incompleto justo
+donde más se consulta. `applyProductStockDelta` devuelve ahora la llave usada
+(`{ applied, variantId, branchId }`) y venta, devolución y ajuste asientan
+contra ella.
+
+### Criterio de entrada revisado
+
+1. ~~Cero filas con `variantId IS NULL`~~ — retirado: ver 3.1.
+2. Ningún acceso a `products.stock` fuera del código que se retira — **no
+   cumplido**, ver 3.2.
+3. La ventana de estabilización de la fase 2 en producción — **no cumplida**:
+   la fase 2 se entregó hoy.
+
+### Alcance real cuando se desbloquee
+
+- Migrar los seis consumidores de `products.stock` a `branch_inventory`.
+- Retirar `products.stock`, `product_variants.cost` y `product_variants.price`.
+- Eliminar `mirrorLegacyProductStock` y el camino legacy de `applyProductStockDelta`.
+- `attachVariantStock` pierde el fallback a `rest.stock`.
+- Documentar `stock` del `CreateProductDto` como "existencia inicial en la
+  sucursal del alta", no como columna del producto.
 
 ---
 
