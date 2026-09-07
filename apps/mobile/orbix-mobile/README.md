@@ -12,24 +12,53 @@ tokens (`oklch`) fueron portados a sRGB con mapeo de gamut real en
 ```bash
 pnpm install       # desde la raíz del monorepo
 pnpm dev:server    # la API, en :3001
+node scripts/proxy.js   # proxy :3002 → :3001, desde la raíz del monorepo
 pnpm dev:mobile    # Metro  (o: pnpm --filter @orbix/mobile dev)
 ```
 
-No hace falta ningún `.env` para arrancar. La app deduce la URL de la API del
-propio dev server: `hostUri` es la dirección con la que tu dispositivo alcanzó a
-Metro, así que ya es enrutable desde él, y solo se le cambia el puerto por el
-`3001` de la API. Funciona igual en un teléfono físico, en el emulador de
-Android y en web, sin escribir ninguna IP a mano.
+### La app móvil se conecta al puerto 3002, no al 3001
 
-Dos casos donde sí tienes que intervenir:
+`scripts/proxy.js` (en la raíz del monorepo) escucha en **3002** y reenvía todo a
+`localhost:3001/api`, que es donde corre la API de NestJS. **Las apps móviles
+apuntan siempre al 3002**; el 3001 queda para los clientes que viven en la misma
+máquina (ERP web, POS).
+
+Por qué existe el salto:
+
+- **CORS.** La API solo admite los orígenes de `CORS_ORIGIN` (las apps web
+  internas). El proxy responde `Access-Control-Allow-Origin: *`, que es lo que
+  necesita un cliente que no está en esa lista — la app en modo web, o un
+  WebView.
+- **Una sola URL estable.** El dispositivo la alcanza por la IP LAN de tu
+  máquina (`http://192.168.x.x:3002/api`), sin depender de qué puerto anuncie
+  Metro en cada arranque.
+- **HTTPS.** El proxy puede apuntar a un backend con TLS (`TARGET_HTTPS`) sin
+  que la app tenga que lidiar con certificados de desarrollo.
+
+En un teléfono físico, pon la IP LAN de tu máquina en `.env`:
+
+```bash
+EXPO_PUBLIC_API_URL=http://192.168.x.x:3002/api   # tu IP, no localhost
+```
+
+`localhost` desde el teléfono es el propio teléfono, así que ahí no sirve.
+
+Sin `.env`, la app deduce la URL del propio dev server: `hostUri` es la dirección
+con la que tu dispositivo alcanzó a Metro, así que ya es enrutable desde él, y
+solo se le cambia el puerto. **Esa deducción usa `DEV_API_PORT` de
+[`src/constants/env.ts`](src/constants/env.ts) y hoy apunta al 3001**, saltándose
+el proxy: funciona para una app nativa (no hay CORS de por medio), pero no para
+la app en web. Si quieres el proxy siempre, fija `EXPO_PUBLIC_API_URL`, que
+tiene prioridad sobre lo deducido.
+
+Otros casos donde tienes que intervenir:
 
 - **`expo start --host localhost`** — Expo solo hace `adb reverse` del puerto de
-  Metro. Añade `adb reverse tcp:3001 tcp:3001`.
-- **API en otra máquina** — fija `EXPO_PUBLIC_API_URL` en un `.env`, que siempre
-  tiene prioridad sobre lo deducido.
+  Metro. Añade `adb reverse tcp:3002 tcp:3002` (o `tcp:3001` si vas directo).
+- **API en otra máquina** — fija `EXPO_PUBLIC_API_URL` en un `.env`.
 
-Copia `.env.example` a `.env` solo si necesitas Google Sign-In o cambiar algún
-default.
+Copia `.env.example` a `.env` solo si necesitas Google Sign-In, apuntar al proxy
+desde un dispositivo físico, o cambiar algún default.
 
 ```bash
 pnpm --filter @orbix/mobile typecheck   # tsc --noEmit

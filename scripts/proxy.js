@@ -1,7 +1,26 @@
 /**
- * Proxy HTTP → HTTP/HTTPS para desarrollo
+ * Proxy HTTP → HTTP/HTTPS para desarrollo.
+ *
+ * **Es la puerta de entrada de las apps móviles.** Escucha en :3002 y reenvía a
+ * la API de NestJS en localhost:3001/api. El 3001 queda para los clientes que
+ * viven en la misma máquina (ERP web, POS); las apps móviles apuntan siempre
+ * aquí.
+ *
+ * Qué aporta el salto:
+ *  - CORS: la API solo admite los orígenes de `CORS_ORIGIN` (las apps web
+ *    internas). Este proxy responde `Access-Control-Allow-Origin: *`, que es lo
+ *    que necesita un cliente fuera de esa lista — la app en modo web, un WebView.
+ *  - Una URL estable para el dispositivo, que no depende del puerto que anuncie
+ *    Metro en cada arranque.
+ *  - HTTPS: puede apuntar a un backend con TLS (`TARGET_HTTPS`) sin que la app
+ *    lidie con certificados de desarrollo.
+ *
  * Ejecutar: node scripts/proxy.js
- * Luego usar: http://<TU_IP_LAN>:3002/api en tu .env
+ * Luego, en el `.env` del móvil (IP LAN de la máquina, nunca `localhost`, que
+ * desde el teléfono es el propio teléfono):
+ *   EXPO_PUBLIC_API_URL=http://<TU_IP_LAN>:3002/api
+ *
+ * Ver apps/mobile/orbix-mobile/README.md.
  */
 
 const http = require("http");

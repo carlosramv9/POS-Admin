@@ -31,7 +31,18 @@ function optional(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-/** Puerto del backend NestJS en desarrollo (ver `api/.env`). */
+/**
+ * Puerto al que apunta la URL DEDUCIDA del dev server (ver `api/.env`).
+ *
+ * Ojo con el contrato de red del proyecto: las apps móviles se conectan al
+ * **3002**, que es el proxy (`scripts/proxy.js` en la raíz del monorepo) hacia
+ * la API en el 3001. Esta constante deja la deducción automática apuntando
+ * directo al 3001, que funciona para una app NATIVA porque no hay CORS de por
+ * medio; la app en web sí necesita el proxy.
+ *
+ * Para usar el proxy siempre, fija `EXPO_PUBLIC_API_URL`, que tiene prioridad
+ * sobre lo deducido — ver el README.
+ */
 const DEV_API_PORT = 3001;
 
 /**
@@ -45,7 +56,8 @@ const DEV_API_PORT = 3001;
  *
  * Excepción: con `expo start --host localhost`, `hostUri` es `localhost` y
  * Expo solo hace `adb reverse` del puerto de Metro. Ahí hace falta también
- * `adb reverse tcp:3001 tcp:3001`, o fijar `EXPO_PUBLIC_API_URL`.
+ * `adb reverse tcp:3001 tcp:3001` (o `tcp:3002 tcp:3002` si pasas por el
+ * proxy), o fijar `EXPO_PUBLIC_API_URL`.
  *
  * Devuelve `undefined` en release (no hay dev server) y ante cualquier formato
  * inesperado; en ambos casos manda `EXPO_PUBLIC_API_URL`.
