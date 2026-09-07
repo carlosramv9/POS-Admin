@@ -689,11 +689,10 @@ export class ProductsService {
               price: aPromover.price ?? 0,
             },
           });
-          // Sus filas de `branch_inventory` ya existen y conservan la existencia:
-          // solo se actualizan los valores comerciales de la sucursal en
-          // contexto, igual que al editar cualquier variante. La existencia NO se
-          // toca — repartir el stock que había suelto entre las presentaciones es
-          // un ajuste de inventario explícito, con su movimiento (ADR-0030).
+          // Sus filas de `branch_inventory` ya existen: conservan la existencia
+          // en TODAS las sucursales y el historial. Solo se actualizan los
+          // valores comerciales de la sucursal en contexto, igual que al editar
+          // cualquier otra variante.
           const promovida: Prisma.BranchInventoryUpdateManyMutationInput = {
             ...(aPromover.cost !== undefined ? { cost: aPromover.cost } : {}),
             ...(aPromover.price !== undefined ? { price: aPromover.price } : {}),
@@ -703,6 +702,44 @@ export class ProductsService {
               where: { variantId: defaultVariant.id, branchId, productId: id },
               data: promovida,
             });
+          }
+
+          // La existencia capturada para la presentación SÍ se aplica.
+          //
+          // Antes se ignoraba y la promovida se quedaba con la que traía la
+          // default: quien daba de alta un producto con 15 sueltos y luego lo
+          // dividía en dos presentaciones de 7 y 8 acababa con 15 y 8 — total 23
+          // en vez de 15, y el 7 que había escrito desaparecía sin decir nada.
+          //
+          // No es repartir el stock automáticamente (eso sigue prohibido por
+          // ADR-0030): es aplicar el número que el usuario escribió, y por eso
+          // deja su AJUSTE en el ledger con la diferencia.
+          if (stockBranchId && aPromover.stock !== undefined) {
+            const filaActual = await tx.branchInventory.findUnique({
+              where: { branchId_variantId: { branchId: stockBranchId, variantId: defaultVariant.id } },
+              select: { stock: true },
+            });
+            const delta = aPromover.stock - (filaActual?.stock ?? 0);
+            if (delta !== 0) {
+              await this.inventoryEngine.applyProductStockDelta(tx, {
+                productId: id,
+                tenantId,
+                delta,
+                branchId: stockBranchId,
+                variantId: defaultVariant.id,
+              });
+              await this.inventoryEngine.recordProductMovement(tx, {
+                tenantId,
+                type: 'AJUSTE',
+                productId: id,
+                variantId: defaultVariant.id,
+                branchId: stockBranchId,
+                quantity: delta,
+                referenceId: defaultVariant.id,
+                referenceType: 'VARIANT_PROMOTION',
+                notes: `Existencia capturada al configurar "${aPromover.name}" (${delta >= 0 ? '+' : ''}${delta})`,
+              });
+            }
           }
         }
 
@@ -812,6 +849,18 @@ export class ProductsService {
       return tx.product.findUnique({ where: { id }, include: PRODUCT_INCLUDE }) as Promise<Product>;
     });
 
+    // Misma forma que `create`/`findOne`: `stock` calculado desde las filas de
+    // (sucursal, variante), y precio/costo efectivos de la sucursal en contexto.
+    //
+    // El PATCH devolvía el producto CRUDO: sus variantes llegaban sin `stock` y
+    // con el precio legacy. La app móvil guarda esa respuesta en su caché, así
+    // que al reabrir el producto para editarlo pintaba "undefined" en la
+    // existencia de cada presentación.
+    const respuesta = this.attachVariantStock(
+      updated as ProductWithRelations,
+      this.tenantContext.getBranchId() ?? null,
+    ) as Product;
+
     if (
       productData.price != null &&
       Number(productData.price) !== Number(product.price)
@@ -825,9 +874,25 @@ export class ProductsService {
       });
     }
 
-    return updated;
+    return respuesta;
   }
 
+  /**
+   * Borra un producto.
+   *
+   * Cuatro relaciones tienen `RESTRICT` y bloquean el borrado en la base. Antes
+   * se intentaba el `delete` a secas y las tres que no estaban comprobadas
+   * salían como un 500 de Prisma sin explicar nada; ahora cada una da su motivo:
+   *
+   *  - Ventas (`orderItems`): historial de negocio, nunca se borra.
+   *  - Compras (orden o recepción): igual, es historial con proveedor.
+   *  - Formar parte de un combo: hay que sacarlo del combo primero.
+   *  - Movimientos de inventario: NO bloquean. Son la contabilidad interna del
+   *    propio producto —incluido el AJUSTE que deja configurar sus
+   *    presentaciones— y sin el producto no se pueden leer ni reportar, así que
+   *    se van con él. Sin esto, configurar variantes volvía el producto
+   *    imborrable para siempre.
+   */
   async remove(id: string): Promise<void> {
     const tenantId = this.tenantContext.requireTenantId();
     const product = await this.prisma.product.findFirst({
@@ -841,13 +906,33 @@ export class ProductsService {
       throw new BadRequestException('Cannot delete product with existing orders');
     }
 
+    const [enCompras, enRecepciones, enCombos] = await Promise.all([
+      this.prisma.purchaseOrderItem.count({ where: { productId: id } }),
+      this.prisma.purchaseReceiptItem.count({ where: { productId: id } }),
+      this.prisma.comboItem.count({ where: { childProductId: id } }),
+    ]);
+
+    if (enCompras > 0 || enRecepciones > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar un producto que aparece en órdenes de compra o recepciones',
+      );
+    }
+    if (enCombos > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar un producto que forma parte de un combo; quítalo del combo primero',
+      );
+    }
+
     await Promise.all(
       product.images.flatMap((img) =>
         img.key ? [this.r2.delete(img.key)] : [],
       ),
     );
 
-    await this.prisma.product.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.inventoryMovement.deleteMany({ where: { productId: id, tenantId } });
+      await tx.product.delete({ where: { id } });
+    });
   }
 
   async uploadImage(productId: string, file: Express.Multer.File) {

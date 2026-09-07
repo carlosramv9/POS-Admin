@@ -20,9 +20,9 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
 
   function build(
     existing: { id: string; isDefault: boolean }[],
-    options: { branchId?: string | null; branches?: string[] } = {},
+    options: { branchId?: string | null; branches?: string[]; stockActual?: number } = {},
   ) {
-    const { branchId = null, branches = [] } = options;
+    const { branchId = null, branches = [], stockActual } = options;
     const deleted: string[][] = [];
     const updated: { id: string; name: string | null; isDefault?: boolean }[] = [];
     const created: { name: string }[] = [];
@@ -54,6 +54,10 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
       productFeature: { deleteMany: jest.fn(), createMany: jest.fn() },
       branch: { findMany: jest.fn().mockResolvedValue(branches.map((id) => ({ id }))) },
       branchInventory: {
+        // Existencia actual de la fila (sucursal, variante) que lee la promocion.
+        findUnique: jest.fn(() =>
+          Promise.resolve(stockActual === undefined ? null : { stock: stockActual }),
+        ),
         createMany: jest.fn(({ data }: { data: typeof seeded }) => {
           seeded.push(...data);
           return Promise.resolve({ count: data.length });
@@ -67,6 +71,12 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
       comboItem: { deleteMany: jest.fn(), createMany: jest.fn() },
     };
 
+    const engine = {
+      applyProductStockDelta: jest.fn().mockResolvedValue({ applied: true, variantId: 'v', branchId: 'b' }),
+      recordProductMovement: jest.fn().mockResolvedValue(undefined),
+      getProductStock: jest.fn().mockResolvedValue(null),
+    };
+
     const prisma = {
       product: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', type: 'SIMPLE', tenantId: 't1' }) },
       $transaction: jest.fn((cb: (t: unknown) => unknown) => cb(tx)),
@@ -78,14 +88,14 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
       { log: jest.fn() } as never,
       {} as never,
       { assertRecipesEnabled: jest.fn() } as never,
-      {} as never,
+      engine as never,
       // Sin sucursal en contexto no hay `isMain` que resolver en estos casos:
       // el resolver devuelve la que traiga el token, o null.
       { resolveBranchId: jest.fn().mockResolvedValue(branchId ?? null) } as never,
       { recordOutcome: jest.fn() } as never,
     );
 
-    return { service, tx, deleted, updated, created, seeded, repriced };
+    return { service, tx, engine, deleted, updated, created, seeded, repriced };
   }
 
   /**
@@ -140,18 +150,57 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
       expect(deleted).toEqual([]);
     });
 
-    it('la existencia de la default NO se reparte al promoverla', async () => {
+    it('no siembra filas nuevas: la promovida reusa las de la default', async () => {
       const { service, seeded } = build([DEFAULT_VARIANT], {
         branchId: 'b-centro',
         branches: ['b-centro'],
       });
 
-      await service.update('p1', { variants: [{ name: 'Talla XL', stock: 999 }] } as never);
+      await service.update('p1', { variants: [{ name: 'Talla XL' }] } as never);
 
-      // No se siembra nada: la fila ya existe y su stock es el que habia. Repartir
-      // el stock suelto entre presentaciones es un ajuste explicito, con su
-      // movimiento de inventario.
+      // La fila de existencias ya existe y se conserva con su historial: por eso
+      // la promocion no pierde inventario.
       expect(seeded).toEqual([]);
+    });
+
+    it('la existencia capturada para la presentacion SI se aplica, con su AJUSTE', async () => {
+      // Antes se ignoraba y la promovida se quedaba con la de la default: dar de
+      // alta con 15 sueltos y dividir en 7 y 8 dejaba 15 y 8 —total 23— y el 7
+      // escrito desaparecia sin decir nada.
+      const { service, engine } = build([DEFAULT_VARIANT], {
+        branchId: 'b-centro',
+        branches: ['b-centro'],
+        stockActual: 15,
+      });
+
+      await service.update('p1', { variants: [{ name: 'Glaseada', stock: 7 }] } as never);
+
+      expect(engine.applyProductStockDelta).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ delta: -8, variantId: DEFAULT_VARIANT.id, branchId: 'b-centro' }),
+      );
+      // El ledger explica a donde fueron las otras 8.
+      expect(engine.recordProductMovement).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          type: 'AJUSTE',
+          referenceType: 'VARIANT_PROMOTION',
+          quantity: -8,
+          variantId: DEFAULT_VARIANT.id,
+        }),
+      );
+    });
+
+    it('sin existencia capturada no se toca el inventario', async () => {
+      const { service, engine } = build([DEFAULT_VARIANT], {
+        branchId: 'b-centro',
+        branches: ['b-centro'],
+        stockActual: 15,
+      });
+
+      await service.update('p1', { variants: [{ name: 'Glaseada' }] } as never);
+
+      expect(engine.applyProductStockDelta).not.toHaveBeenCalled();
     });
 
     it('la segunda presentacion se agrega normal, sin promover nada', async () => {
