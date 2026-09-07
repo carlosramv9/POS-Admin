@@ -432,6 +432,11 @@ export class InventoryEngine {
       if (row) return row.stock;
     }
 
+    // Ultimo respaldo sobre el espejo `products.stock`. Forma parte del camino
+    // legacy que se retira junto con la columna en la fase contract: hoy ya no
+    // deberia alcanzarse nunca, porque todo tenant activo tiene su sucursal
+    // principal y todo producto sus filas sembradas
+    // (`20260908120000_branch_for_branchless_tenants`).
     const product = await tx.product.findFirst({
       where: { id: productId, tenantId },
       select: { stock: true },

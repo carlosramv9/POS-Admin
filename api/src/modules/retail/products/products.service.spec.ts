@@ -78,6 +78,7 @@ describe('ProductsService', () => {
   const mockInventoryEngine = {
     applyProductStockDelta: jest.fn().mockResolvedValue({ applied: true, variantId: 'v-p1', branchId: 'b1' }),
     recordProductMovement: jest.fn().mockResolvedValue(undefined),
+    getProductStock: jest.fn().mockResolvedValue(null),
   };
   const mockAiUsageRecorder = { recordOutcome: jest.fn().mockResolvedValue(undefined) };
 

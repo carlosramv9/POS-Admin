@@ -17,6 +17,14 @@ describe('ProductsService — BR-02 recipe gating', () => {
 
   const createdProduct = { id: 'prod-1', sku: 'SKU1', name: 'Widget', type: 'SIMPLE' };
 
+  /**
+   * Lo que `create` devuelve ahora: la misma forma que `findOne`, con `stock`
+   * calculado desde las filas de (sucursal, variante). Antes devolvia el
+   * producto crudo, asi que el mismo registro traia un `stock` distinto segun
+   * se acabara de crear o se releyera.
+   */
+  const createdResponse = { ...createdProduct, variants: [], stock: 0 };
+
   const mockPrisma = {
     product: {
       findUnique: jest.fn().mockResolvedValue(null),
@@ -37,6 +45,7 @@ describe('ProductsService — BR-02 recipe gating', () => {
   const mockInventoryEngine = {
     applyProductStockDelta: jest.fn().mockResolvedValue({ applied: true, variantId: 'v-p1', branchId: 'b1' }),
     recordProductMovement: jest.fn().mockResolvedValue(undefined),
+    getProductStock: jest.fn().mockResolvedValue(null),
   };
   const mockAiUsageRecorder = { recordOutcome: jest.fn().mockResolvedValue(undefined) };
 
@@ -76,13 +85,13 @@ describe('ProductsService — BR-02 recipe gating', () => {
   // ── Retail (recipes disabled) ─────────────────────────────────────────────
   it('Retail: SIMPLE product creates without consulting recipes (no gate)', async () => {
     mockBusinessConfig.hasFeature.mockResolvedValue(false);
-    await expect(service.create(dto())).resolves.toEqual(createdProduct);
+    await expect(service.create(dto())).resolves.toEqual(createdResponse);
     expect(mockBusinessConfig.hasFeature).not.toHaveBeenCalled();
   });
 
   it('Retail: COMBO stays available and never touches recipes (combos independent)', async () => {
     mockBusinessConfig.hasFeature.mockResolvedValue(false);
-    await expect(service.create(dto({ type: 'COMBO' }))).resolves.toEqual(createdProduct);
+    await expect(service.create(dto({ type: 'COMBO' }))).resolves.toEqual(createdResponse);
     expect(mockBusinessConfig.hasFeature).not.toHaveBeenCalled();
   });
 
@@ -101,7 +110,7 @@ describe('ProductsService — BR-02 recipe gating', () => {
   // ── Restaurant (recipes enabled) ──────────────────────────────────────────
   it('Restaurant: RECIPE product is allowed', async () => {
     mockBusinessConfig.hasFeature.mockResolvedValue(true);
-    await expect(service.create(dto({ type: 'RECIPE' }))).resolves.toEqual(createdProduct);
+    await expect(service.create(dto({ type: 'RECIPE' }))).resolves.toEqual(createdResponse);
     expect(mockBusinessConfig.hasFeature).toHaveBeenCalledWith('enableRecipes');
   });
 });

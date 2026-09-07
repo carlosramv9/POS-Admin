@@ -12,11 +12,11 @@ const STORE_PRODUCT_SELECT = {
   name: true,
   slug: true,
   description: true,
-  // Legacy: se conservan como respaldo mientras existan productos sin fila de
-  // existencias sembrada. El precio y el stock efectivos salen de branchInventory.
+  // `price` y `comparePrice` se conservan como respaldo del precio de lista
+  // cuando el producto no tiene fila en la sucursal servida. `stock` ya NO se
+  // proyecta: la existencia sale exclusivamente de branchInventory.
   price: true,
   comparePrice: true,
-  stock: true,
   trackInventory: true,
   category: { select: { id: true, name: true, slug: true } },
   images: {
@@ -120,8 +120,9 @@ export class StoreService {
       select: {
         ...STORE_PRODUCT_SELECT,
         branchInventory: {
-          // Cuando el tenant no tiene sucursal principal esto no trae nada y
-          // todo cae al respaldo legacy del producto.
+          // Sin sucursal principal no trae nada y la tienda publica existencia
+          // 0. Es lo correcto: un tenant sin sucursal no tiene inventario que
+          // ofrecer, y las dos rutas de alta crean la suya desde el principio.
           where: { branchId: branchId ?? '' },
           select: { variantId: true, stock: true, price: true, comparePrice: true },
         },
@@ -151,9 +152,13 @@ export class StoreService {
         // producto es su suma. Publicar el de la default —que no corresponde a
         // ninguna opción del selector— anunciaba disponibilidad de un artículo
         // que el cliente no puede escoger.
+        //
+        // Sin fila en la sucursal servida la existencia es 0, no el espejo
+        // `products.stock`: la tienda anunciaba disponibilidad de productos que
+        // esa sucursal no tiene.
         stock: namedVariants.length
           ? namedVariants.reduce((total, v) => total + v.stock, 0)
-          : (own?.stock ?? rest.stock),
+          : (own?.stock ?? 0),
         variants: namedVariants,
       };
     });

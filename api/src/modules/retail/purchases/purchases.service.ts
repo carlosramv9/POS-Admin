@@ -368,14 +368,13 @@ export class PurchasesService {
               })
             : null;
 
-        // Fallback al producto mientras existan filas sin sembrar (fase expand).
-        const currentProduct = await tx.product.findFirst({
-          where: { id: ri.productId, tenantId },
-          select: { stock: true, avgCost: true },
-        });
-
-        const currentStock = currentRow?.stock ?? currentProduct?.stock ?? 0;
-        const currentAvgCostRaw = currentRow?.avgCost ?? currentProduct?.avgCost;
+        // La base del costeo es la fila de (sucursal, variante). Ya no se cae
+        // al espejo `products.stock`, que es la suma de TODAS las variantes de
+        // TODAS las sucursales: usarlo como existencia previa de una sola
+        // deformaba el promedio ponderado en cuanto el producto tenía más de
+        // una presentación o más de una sucursal.
+        const currentStock = currentRow?.stock ?? 0;
+        const currentAvgCostRaw = currentRow?.avgCost;
         const currentAvgCost = currentAvgCostRaw ? Number(currentAvgCostRaw) : unitCost;
 
         const newAvgCost =

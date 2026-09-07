@@ -14,7 +14,8 @@ const TENANT = 'tenant-1';
 function build(prev: number) {
   const applyProductStockDelta = jest.fn().mockResolvedValue({ applied: true, variantId: 'v-p1', branchId: 'b1' });
   const recordProductMovement = jest.fn().mockResolvedValue(undefined);
-  const engine = { applyProductStockDelta, recordProductMovement };
+  const getProductStock = jest.fn().mockResolvedValue(null);
+  const engine = { applyProductStockDelta, recordProductMovement, getProductStock };
 
   // El readback dentro de la transacción devuelve el producto ya actualizado.
   const findFirstOrThrow = jest.fn().mockResolvedValue({ id: 'p1', stock: prev });

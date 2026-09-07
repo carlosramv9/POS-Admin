@@ -263,7 +263,7 @@ export class ProductsImportService {
             where: { tenantId_sku: { tenantId, sku } },
             data,
           });
-          await this.syncBranchInventory(tenantId, updated);
+          await this.syncBranchInventory(tenantId, updated, data.stock);
           result.updated++;
         } else {
           const slug = SlugUtil.generateUnique(name, usedSlugs);
@@ -272,7 +272,7 @@ export class ProductsImportService {
           const created = await this.prisma.product.create({
             data: { ...data, tenantId, sku, slug, type: 'SIMPLE' },
           });
-          await this.syncBranchInventory(tenantId, created);
+          await this.syncBranchInventory(tenantId, created, data.stock);
           result.created++;
         }
       } catch (err) {
@@ -295,7 +295,17 @@ export class ProductsImportService {
    * multiplicaría la existencia. Los valores comerciales (precio, costo, mínimo)
    * sí se propagan a todas las sucursales, porque son del catálogo.
    */
-  private async syncBranchInventory(tenantId: string, product: Product): Promise<void> {
+  private async syncBranchInventory(
+    tenantId: string,
+    product: Product,
+    /**
+     * Existencia que trae la hoja para esta fila. Se pasa explícita en vez de
+     * releerla de `products.stock`: esa columna es el espejo legacy —la suma de
+     * todas las variantes de todas las sucursales— y se retira con la fase
+     * contract. Aquí lo que manda es el número que capturó el usuario.
+     */
+    stockDeLaHoja: number,
+  ): Promise<void> {
     const variantId = await this.variants.ensureDefaultVariantId(this.prisma, product.id, tenantId);
     if (!variantId) return;
 
@@ -322,12 +332,12 @@ export class ProductsImportService {
       const isTarget = branch.id === targetBranchId;
       await this.prisma.branchInventory.upsert({
         where: { branchId_variantId: { branchId: branch.id, variantId } },
-        update: isTarget ? { ...commercial, stock: product.stock } : commercial,
+        update: isTarget ? { ...commercial, stock: stockDeLaHoja } : commercial,
         create: {
           branchId: branch.id,
           productId: product.id,
           variantId,
-          stock: isTarget ? product.stock : 0,
+          stock: isTarget ? stockDeLaHoja : 0,
           ...commercial,
         },
       });

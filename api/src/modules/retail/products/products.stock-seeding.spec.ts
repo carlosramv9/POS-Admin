@@ -149,6 +149,18 @@ describe('ProductsService.create — la existencia inicial no se replica por suc
     expect(seeded.reduce((total, row) => total + row.stock, 0)).toBe(14);
   });
 
+  it('sin filas de inventario el stock es 0, no el espejo legacy del producto', async () => {
+    // `branch_inventory` es la unica verdad. El respaldo sobre `products.stock`
+    // existia para los tenants sin sucursal, que no tenian donde guardar la
+    // existencia; la migracion 20260908120000 les creo la suya y sembro sus
+    // filas, y las dos rutas de alta de tenant crean la suya desde el principio.
+    const { service } = build({ branches: [] });
+
+    const creado = (await service.create(dto)) as unknown as { stock: number };
+
+    expect(creado.stock).toBe(0);
+  });
+
   it('un tenant sin sucursales no siembra nada y el alta no revienta', async () => {
     const { service, seeded } = build({ branches: [] });
 

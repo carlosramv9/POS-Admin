@@ -4,7 +4,7 @@
 **Alcance:** `orbix-admin/` · `api/src/modules/retail/products`, `retail/inventory`, `retail/purchases`, `core/branches`, `core/store` · `apps/pos-web/` · `web/`
 **Origen:** auditoría del módulo de productos (variantes), 2026-09-05
 **Decisión de referencia:** ADR-0030 *Variante por defecto obligatoria como unidad vendible (Orbix)* — aceptada 2026-08-17, entregada en fase *expand* 2026-08-18, *contract* pendiente
-**Estado del plan:** Fases 0, 1 y 2 implementadas (2026-09-05/07). Fase 3 evaluada y **bloqueada** — ver §Fase 3.
+**Estado del plan:** Fases 0, 1 y 2 implementadas. Fase 3 preparada: las lecturas de `products.stock` ya están migradas; falta solo el `DROP` y su ventana de estabilización — ver §Fase 3.
 
 > Convenciones: **Confirmado** = respaldado por código citado en la auditoría. **Bloqueante** = no se puede desplegar la fase siguiente sin esto. **S/M/L** = tamaño relativo de la entrega.
 
@@ -290,7 +290,7 @@ Tests nuevos:
 
 ---
 
-## Fase 3 — Contract (irreversible) — ⛔ NO EJECUTADA: criterios no cumplidos
+## Fase 3 — Contract (irreversible) — 🟡 preparada, falta el `DROP`
 
 Evaluada el 2026-09-07 contra la base y el código reales. **Dos partes del plan
 original estaban mal**, y se corrigen aquí antes de que nadie las ejecute.
@@ -319,20 +319,50 @@ producto" e "histórico anterior al cambio"— y los lectores deben tratarlo as�
 Tampoco cabe un `CHECK (productId IS NULL OR variantId IS NOT NULL)`: lo
 violaría el propio `SET NULL` al borrar una variante.
 
-### 3.2 Retirar `products.stock` — pendiente, criterio no cumplido
+### 3.2 Retirar las LECTURAS de `products.stock` — ✅ hecho (2026-09-08)
 
-Este sí es el objetivo real de la fase contract, y sigue bloqueado. Lo leen o lo
-escriben, fuera del código que se retiraría:
+Los consumidores resultaron ser menos de los que sugería el grep inicial
+(`cash-sessions:671` es `supply.update`, no producto; web y POS leen el `stock`
+YA calculado por la API, no la columna), pero los reales compartían todos la
+misma condición de disparo: **"producto sin fila en `branch_inventory`"**.
 
-- `products-import.service.ts:325,330` — siembra las filas de sucursal desde él.
-- `core/cash-sessions/cash-sessions.service.ts:671` — lo incrementa.
-- `core/store/store.service.ts:19` — lo proyecta para la tienda.
-- `retail/inventory/inventory-consumption.engine.ts:97` — lo carga en el árbol de expansión.
-- `products.service.ts:232,935` — lo pone a 0 para no-SIMPLE y lo lee para el audit.
-- `web/src/services/retail/product-service.ts` y `apps/pos-web/src/stores/cart-store.ts` — lo leen como existencia del producto.
+Y esa condición tenía un dueño concreto: **Manzanitas**, tenant ACTIVE con 56
+productos, 1400 unidades y CERO sucursales, creado ocho días antes de la
+migración expand — que sembraba uniéndose a `branches` y por tanto lo saltó
+entero. Su inventario vivía solo en la columna espejo. Quitar los respaldos sin
+resolverlo le habría puesto todo a cero.
 
-Cada uno necesita migrarse a `branch_inventory` antes de poder soltar la columna.
-Es trabajo real, no una limpieza.
+El hueco era histórico, no una fuga abierta: las dos rutas de alta de tenant
+(`tenants.service.ts`, `platform-tenants.service.ts`) ya crean su sucursal
+`Principal`.
+
+**Migración `20260908120000_branch_for_branchless_tenants`** — crea la sucursal
+principal a los tenants ACTIVE que no tienen ninguna, siembra `branch_inventory`
+desde `products.stock` (una sola sucursal, sin riesgo de replicación) y termina
+con una guarda que aborta si queda algún producto huérfano.
+
+Respaldos retirados:
+
+| Dónde | Antes | Ahora |
+|---|---|---|
+| `attachVariantStock` | `allRows.length ? suma : rest.stock` | siempre la suma de las filas |
+| `store.service` | `own?.stock ?? rest.stock`, y `stock` proyectado | `own?.stock ?? 0`; deja de proyectarse |
+| `purchases.service` | `currentRow?.stock ?? currentProduct?.stock` | solo la fila de (sucursal, variante) |
+| `products-import.service` | releía `product.stock` tras escribirlo | recibe el valor de la hoja explícito |
+| `inventory-consumption.engine` | `stock` en `PRODUCT_LOAD_SELECT` | campo muerto, eliminado |
+| `products.service` (audit de ajuste) | `product.stock` | la existencia efectiva del engine |
+
+De paso: `create` devolvía el producto crudo mientras `findOne` devolvía el
+calculado, así que el mismo registro traía un `stock` distinto según se acabara
+de crear o se releyera. Ahora las dos devuelven la misma forma.
+
+**Queda una sola lectura**, la del propio camino legacy de
+`InventoryEngine.getProductStock`, que se retira junto con la columna. Hoy ya no
+debería alcanzarse: cero productos de tenants activos sin fila de inventario.
+
+El espejo de ESCRITURA (`mirrorLegacyProductStock`) se conserva a propósito
+hasta el `DROP COLUMN`: mantiene el cambio reversible y cubre cualquier lector
+que se nos haya pasado.
 
 ### 3.3 Lo que sí se corrigió al evaluar
 
@@ -347,19 +377,21 @@ contra ella.
 ### Criterio de entrada revisado
 
 1. ~~Cero filas con `variantId IS NULL`~~ — retirado: ver 3.1.
-2. Ningún acceso a `products.stock` fuera del código que se retira — **no
-   cumplido**, ver 3.2.
-3. La ventana de estabilización de la fase 2 en producción — **no cumplida**:
-   la fase 2 se entregó hoy.
+2. Ningún acceso de LECTURA a `products.stock` fuera del camino legacy que se
+   retira con la columna — ✅ **cumplido** (2026-09-08), ver 3.2.
+3. La ventana de estabilización en producción — **pendiente**. Es lo único que
+   falta, y es una decisión de calendario, no de código.
 
-### Alcance real cuando se desbloquee
+### Lo que queda para el `DROP` (un solo paso, irreversible)
 
-- Migrar los seis consumidores de `products.stock` a `branch_inventory`.
-- Retirar `products.stock`, `product_variants.cost` y `product_variants.price`.
-- Eliminar `mirrorLegacyProductStock` y el camino legacy de `applyProductStockDelta`.
-- `attachVariantStock` pierde el fallback a `rest.stock`.
+- `DROP COLUMN products.stock`, `product_variants.cost`, `product_variants.price`.
+- Eliminar `mirrorLegacyProductStock` y el camino legacy de
+  `applyProductStockDelta` / `getProductStock`.
 - Documentar `stock` del `CreateProductDto` como "existencia inicial en la
   sucursal del alta", no como columna del producto.
+
+Antes de ejecutarlo, volver a correr la comprobación de huérfanos: cero
+productos de tenants activos sin fila en `branch_inventory`.
 
 ---
 

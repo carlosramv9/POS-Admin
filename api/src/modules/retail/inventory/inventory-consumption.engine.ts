@@ -84,7 +84,9 @@ interface LoadedProduct {
   name: string;
   type: ProductType;
   trackInventory: boolean;
-  stock: number;
+  // `stock` NO se carga: la existencia del producto vive en `branch_inventory`
+  // por (sucursal, variante) y la resuelve el InventoryEngine. La columna
+  // `products.stock` se seguia trayendo aqui sin que nadie la leyera.
   recipe: { items: LoadedRecipeItem[] } | null;
   comboItems: { childProductId: string; quantity: number }[];
 }
@@ -94,7 +96,6 @@ const PRODUCT_LOAD_SELECT = {
   name: true,
   type: true,
   trackInventory: true,
-  stock: true,
   recipe: {
     select: {
       items: {

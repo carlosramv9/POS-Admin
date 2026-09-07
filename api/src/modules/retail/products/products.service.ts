@@ -355,7 +355,14 @@ export class ProductsService {
       });
     }
 
-    return product;
+    // Misma forma que `findOne`/`findAll`: `stock` es la suma de las filas de
+    // (sucursal, variante), no la columna espejo. El alta devolvia el valor
+    // crudo de `products.stock`, asi que el mismo producto traia un numero
+    // distinto segun se acabara de crear o se releyera.
+    return this.attachVariantStock(
+      product as ProductWithRelations,
+      this.tenantContext.getBranchId() ?? null,
+    ) as Product;
   }
 
   /**
@@ -396,12 +403,13 @@ export class ProductsService {
       // `stock` a nivel producto = suma de sus variantes, para no romper las
       // pantallas que todavía leen un escalar.
       //
-      // Sin ninguna fila de inventario se conserva el valor legacy del producto:
-      // los tenants que aún no tienen sucursales no tienen dónde guardar
-      // existencias por variante, y devolver 0 ocultaría su stock real.
-      stock: allRows.length
-        ? enrichedVariants.reduce((total, variant) => total + variant.stock, 0)
-        : rest.stock,
+      // Ya no hay respaldo sobre `products.stock`: `branch_inventory` es la
+      // única verdad. El respaldo existía para los tenants sin sucursal, que no
+      // tenían dónde guardar la existencia por variante; la migración
+      // `20260908120000_branch_for_branchless_tenants` les creó su sucursal
+      // principal y sembró sus filas, y las dos rutas de alta de tenant crean la
+      // suya desde el principio. Sin filas, la respuesta correcta es 0.
+      stock: enrichedVariants.reduce((total, variant) => total + variant.stock, 0),
     };
   }
 
@@ -931,12 +939,20 @@ export class ProductsService {
       return tx.product.findFirstOrThrow({ where: { id, tenantId } });
     });
 
+    // El audit registra la existencia EFECTIVA de (sucursal, variante), no el
+    // espejo `products.stock`: el espejo es la suma de todas las variantes de
+    // todas las sucursales, asi que en un producto con presentaciones el antes
+    // y el despues no correspondian al ajuste que se acababa de hacer.
+    const stockDespues = await this.prisma.$transaction((tx) =>
+      this.inventoryEngine.getProductStock(tx, id, tenantId, branchId),
+    );
+
     await this.audit.log({
       action: 'INVENTORY_ADJUST',
       entityType: 'Product',
       entityId: id,
-      before: { stock: product.stock },
-      after: { stock: updated.stock },
+      before: { stock: stockDespues == null ? null : stockDespues - quantity },
+      after: { stock: stockDespues },
       reason: `Ajuste manual (${quantity >= 0 ? '+' : ''}${quantity})`,
     });
 
