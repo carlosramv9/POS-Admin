@@ -61,7 +61,10 @@ describe('InventoryConsumptionEngine — aislamiento de tenant', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue(product),
       },
-      productVariant: { findFirst: jest.fn().mockResolvedValue(null) },
+      productVariant: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       branch: { findFirst: jest.fn().mockResolvedValue(null) },
       branchInventory: {
         findUnique: jest.fn().mockResolvedValue(null),

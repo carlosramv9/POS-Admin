@@ -151,6 +151,10 @@ function makeTx(
       findFirst: jest.fn(({ where }: { where: { productId: string } }) =>
         Promise.resolve(hasDefaultVariant ? { id: variantOf(where.productId) } : null),
       ),
+      // Resolucion por omision: la UNICA variante del producto.
+      findMany: jest.fn(({ where }: { where: { productId: string } }) =>
+        Promise.resolve(hasDefaultVariant ? [{ id: variantOf(where.productId) }] : []),
+      ),
     },
     branch: {
       findFirst: jest.fn(() => Promise.resolve(mainBranchId ? { id: mainBranchId } : null)),

@@ -628,11 +628,64 @@ export class ProductsService {
           where: { productId: id },
           select: { id: true, isDefault: true },
         });
-        const keepIds = new Set(
-          existing.filter((v) => v.isDefault).map((v) => v.id),
-        );
+
+        // ADR-0030, regla 4: la default SE PROMUEVE, no se elimina.
+        //
+        // Al configurar la primera presentación, la variante default —"el
+        // producto en sí", sin nombre— se renombra conservando su id, su
+        // existencia en todas las sucursales y su historial de ventas. Antes se
+        // conservaba intacta junto a las nuevas, así que el producto acababa con
+        // una línea fantasma que seguía cargando el stock y contra la que
+        // descontaban todas las ventas.
+        //
+        // Solo aplica cuando el producto todavía no tiene presentaciones: con
+        // una ya configurada, la default ya fue promovida y las siguientes se
+        // agregan normal.
+        const defaultVariant = existing.find((v) => v.isDefault);
+        const soloTieneDefault = existing.length === 1 && defaultVariant !== undefined;
+        const nuevasConNombre = variants.filter((v) => !v.id);
+        const aPromover =
+          soloTieneDefault && nuevasConNombre.length > 0 ? nuevasConNombre[0] : null;
+
+        if (aPromover && defaultVariant) {
+          await tx.productVariant.update({
+            where: { id: defaultVariant.id },
+            data: {
+              name: aPromover.name,
+              isDefault: false,
+              cost: aPromover.cost ?? 0,
+              price: aPromover.price ?? 0,
+            },
+          });
+          // Sus filas de `branch_inventory` ya existen y conservan la existencia:
+          // solo se actualizan los valores comerciales de la sucursal en
+          // contexto, igual que al editar cualquier variante. La existencia NO se
+          // toca — repartir el stock que había suelto entre las presentaciones es
+          // un ajuste de inventario explícito, con su movimiento (ADR-0030).
+          const promovida: Prisma.BranchInventoryUpdateManyMutationInput = {
+            ...(aPromover.cost !== undefined ? { cost: aPromover.cost } : {}),
+            ...(aPromover.price !== undefined ? { price: aPromover.price } : {}),
+          };
+          if (branchId && Object.keys(promovida).length > 0) {
+            await tx.branchInventory.updateMany({
+              where: { variantId: defaultVariant.id, branchId, productId: id },
+              data: promovida,
+            });
+          }
+        }
+
+        // La default ya no se conserva por serlo: si fue promovida, sobrevive
+        // como la presentación en la que se convirtió; si no, se conserva porque
+        // el producto sigue sin presentaciones y ella ES el producto.
+        const keepIds = new Set<string>();
+        if (defaultVariant && !aPromover) keepIds.add(defaultVariant.id);
+        if (aPromover && defaultVariant) keepIds.add(defaultVariant.id);
 
         for (const variant of variants) {
+          // La que promovió a la default ya está aplicada: crearla otra vez
+          // duplicaría la presentación.
+          if (variant === aPromover) continue;
+
           if (variant.id && existing.some((v) => v.id === variant.id)) {
             keepIds.add(variant.id);
             await tx.productVariant.update({
@@ -686,7 +739,26 @@ export class ProductsService {
 
         // Solo se eliminan las que el usuario realmente quitó.
         const removed = existing.filter((v) => !keepIds.has(v.id)).map((v) => v.id);
-        if (removed.length > 0) {
+
+        // Degradación: quitar la ÚLTIMA presentación no deja al producto sin
+        // ninguna variante. La última se degrada de vuelta a default (sin
+        // nombre) conservando su existencia y su historial, que es el camino
+        // inverso exacto de la promoción.
+        //
+        // Todo producto tiene siempre exactamente una variante: sin ella no es
+        // direccionable en el inventario y deja de ser vendible. Borrarla
+        // además arrastraría en cascada sus filas de `branch_inventory`.
+        const sobreviven = existing.filter((v) => keepIds.has(v.id)).length;
+        if (sobreviven === 0 && removed.length > 0) {
+          const [aDegradar, ...resto] = removed;
+          await tx.productVariant.update({
+            where: { id: aDegradar },
+            data: { name: null, isDefault: true },
+          });
+          if (resto.length > 0) {
+            await tx.productVariant.deleteMany({ where: { id: { in: resto } } });
+          }
+        } else if (removed.length > 0) {
           await tx.productVariant.deleteMany({ where: { id: { in: removed } } });
         }
       }

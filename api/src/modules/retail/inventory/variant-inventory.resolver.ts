@@ -12,9 +12,12 @@ import { Prisma } from '@prisma/client';
  *
  * Dos reglas de resolución:
  *
- *  - Variante: si el llamador no especifica una, se usa la variante `isDefault`
- *    del producto — la línea implícita "el producto en sí". Un índice único
- *    parcial en la base garantiza que hay exactamente una por producto.
+ *  - Variante: si el llamador no especifica una, se usa la ÚNICA del producto.
+ *    Mientras no se configuran presentaciones esa única es la `isDefault`, la
+ *    línea implícita "el producto en sí"; al configurar la primera, la default
+ *    se promueve a ella (ADR-0030, regla 4) y el producto deja de tener default.
+ *    Con varias presentaciones el llamador tiene que decir cuál: elegir por él
+ *    descontaría en silencio de la que no era.
  *
  *  - Sucursal: la explícita del contexto; si no hay (hoy el 82% de las órdenes
  *    no trae `branchId`), la sucursal `isMain` DEL TENANT DEL CONTEXTO. Si el
@@ -40,30 +43,53 @@ import { Prisma } from '@prisma/client';
 @Injectable()
 export class VariantInventoryResolver {
   /**
-   * Variante contra la que se mueve el inventario de un producto. Devuelve null
-   * si el producto no tiene variante default, lo que en la práctica solo puede
-   * pasar con un producto creado por una ruta que no la sembró — el llamador
-   * debe tratarlo como "sin inventario por variante" y no reventar.
+   * Variante contra la que se mueve el inventario cuando el llamador no indica
+   * ninguna.
+   *
+   * Desde que la default se promueve al configurar la primera presentación
+   * (ADR-0030, regla 4), un producto con variantes YA NO TIENE default. Buscar
+   * `isDefault` sin más devolvía null y el motor caía al camino legacy sobre
+   * `Product.stock`, dejando de mover el inventario por variante.
+   *
+   * Reglas:
+   *  - Una sola variante → esa, sea o no la default. Es "el producto en sí".
+   *  - Varias → el llamador TIENE que decir cuál. Se rechaza en vez de elegir
+   *    por él: descontar en silencio de una presentación cualquiera es peor que
+   *    fallar, porque nadie se entera hasta que cuadran el inventario.
+   *  - Ninguna → null; el producto no es direccionable por variante todavía
+   *    (creado por una ruta que no la sembró) y el llamador cae al legacy.
    */
   async resolveVariantId(
     tx: Prisma.TransactionClient,
     productId: string,
     tenantId: string,
   ): Promise<string | null> {
-    const variant = await tx.productVariant.findFirst({
-      // El filtro viaja por la relación: `ProductVariant` no tiene `tenantId`
-      // propio, su dueño es el producto.
-      where: { productId, isDefault: true, product: { tenantId } },
-      select: { id: true },
+    // El filtro viaja por la relación: `ProductVariant` no tiene `tenantId`
+    // propio, su dueño es el producto.
+    const variants = await tx.productVariant.findMany({
+      where: { productId, product: { tenantId } },
+      select: { id: true, isDefault: true, name: true },
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+      take: 2,
     });
-    return variant?.id ?? null;
+
+    if (variants.length === 0) return null;
+    if (variants.length === 1) return variants[0].id;
+
+    throw new BadRequestException(
+      'Este producto se vende en varias presentaciones: indica cuál con `variantId`',
+    );
   }
 
   /**
-   * Igual que `resolveVariantId`, pero crea la variante default si no existe.
-   * Hace auto-reparable cualquier producto creado por una ruta que no la sembró
-   * (importación, seeds antiguos), en vez de dejarlo silenciosamente sin
-   * inventario. Devuelve null solo si el producto no existe.
+   * Igual que `resolveVariantId`, pero crea la variante default si el producto
+   * no tiene NINGUNA. Hace auto-reparable cualquier producto creado por una ruta
+   * que no la sembró (importación, seeds antiguos), en vez de dejarlo
+   * silenciosamente sin inventario. Devuelve null solo si el producto no existe.
+   *
+   * Con varias presentaciones propaga el error de `resolveVariantId`: crear una
+   * default nueva al lado de ellas reintroduciría la línea fantasma que la
+   * promoción eliminó.
    */
   async ensureDefaultVariantId(
     tx: Prisma.TransactionClient,

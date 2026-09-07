@@ -24,7 +24,7 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
   ) {
     const { branchId = null, branches = [] } = options;
     const deleted: string[][] = [];
-    const updated: { id: string; name: string }[] = [];
+    const updated: { id: string; name: string | null; isDefault?: boolean }[] = [];
     const created: { name: string }[] = [];
     const seeded: { branchId: string; variantId: string; stock: number; price: unknown; cost: unknown }[] = [];
     const repriced: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
@@ -36,10 +36,12 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
       },
       productVariant: {
         findMany: jest.fn().mockResolvedValue(existing),
-        update: jest.fn(({ where, data }: { where: { id: string }; data: { name: string } }) => {
-          updated.push({ id: where.id, name: data.name });
-          return Promise.resolve({ id: where.id });
-        }),
+        update: jest.fn(
+          ({ where, data }: { where: { id: string }; data: { name: string | null; isDefault?: boolean } }) => {
+            updated.push({ id: where.id, name: data.name, isDefault: data.isDefault });
+            return Promise.resolve({ id: where.id });
+          },
+        ),
         create: jest.fn(({ data }: { data: { name: string } }) => {
           created.push({ name: data.name });
           return Promise.resolve({ id: `v-nueva-${created.length}` });
@@ -86,12 +88,17 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
     return { service, tx, deleted, updated, created, seeded, repriced };
   }
 
-  it('conserva la variante default aunque el DTO no la mencione', async () => {
+  /**
+   * Forma HEREDADA: default + presentacion conviviendo. Desde la promocion
+   * (ADR-0030, regla 4) un producto con presentaciones ya no tiene default, pero
+   * los productos configurados antes de ese cambio la conservan y su existencia
+   * es real. Guardar no puede borrarla: se llevaria el stock por cascada.
+   */
+  it('un producto heredado con default y presentacion no pierde ninguna al guardar', async () => {
     const { service, deleted } = build([DEFAULT_VARIANT, TALLA_M]);
 
     await service.update('p1', { variants: [{ id: TALLA_M.id, name: 'Talla M' }] } as never);
 
-    // Nada se borra: la default se preserva por ser interna, Talla M por venir con id.
     expect(deleted).toEqual([]);
   });
 
@@ -113,15 +120,77 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
     expect(deleted).toEqual([[TALLA_L.id]]);
   });
 
-  it('una variante nueva (sin id) se crea y siembra sus existencias', async () => {
-    const { service, tx, created, deleted } = build([DEFAULT_VARIANT]);
+  /**
+   * ADR-0030, regla 4 - la default SE PROMUEVE, no se elimina ni se duplica.
+   *
+   * Antes, la primera presentacion se creaba al lado de la default y el producto
+   * acababa con una linea fantasma que seguia cargando el stock y contra la que
+   * descontaban todas las ventas.
+   */
+  describe('promocion de la variante default', () => {
+    it('la primera presentacion renombra la default conservando su id', async () => {
+      const { service, updated, created, deleted } = build([DEFAULT_VARIANT]);
 
-    await service.update('p1', { variants: [{ name: 'Talla XL', stock: 7 }] } as never);
+      await service.update('p1', { variants: [{ name: 'Talla XL', price: 250, stock: 7 }] } as never);
 
-    expect(created).toEqual([{ name: 'Talla XL' }]);
-    expect(deleted).toEqual([]);
-    // El sembrado consulta las sucursales activas del tenant.
-    expect(tx.branch.findMany).toHaveBeenCalled();
+      expect(updated).toEqual([{ id: DEFAULT_VARIANT.id, name: 'Talla XL', isDefault: false }]);
+      // Ni se crea una variante nueva ni se borra la default: es la misma fila,
+      // asi que conserva existencias en todas las sucursales e historial.
+      expect(created).toEqual([]);
+      expect(deleted).toEqual([]);
+    });
+
+    it('la existencia de la default NO se reparte al promoverla', async () => {
+      const { service, seeded } = build([DEFAULT_VARIANT], {
+        branchId: 'b-centro',
+        branches: ['b-centro'],
+      });
+
+      await service.update('p1', { variants: [{ name: 'Talla XL', stock: 999 }] } as never);
+
+      // No se siembra nada: la fila ya existe y su stock es el que habia. Repartir
+      // el stock suelto entre presentaciones es un ajuste explicito, con su
+      // movimiento de inventario.
+      expect(seeded).toEqual([]);
+    });
+
+    it('la segunda presentacion se agrega normal, sin promover nada', async () => {
+      const { service, updated, created } = build([TALLA_M]);
+
+      await service.update(
+        'p1',
+        { variants: [{ id: TALLA_M.id, name: 'Talla M' }, { name: 'Talla L' }] } as never,
+      );
+
+      expect(created).toEqual([{ name: 'Talla L' }]);
+      expect(updated).toEqual([{ id: TALLA_M.id, name: 'Talla M', isDefault: undefined }]);
+    });
+
+    it('con varias presentaciones ya configuradas no se promueve ninguna', async () => {
+      const { service, created } = build([TALLA_M, TALLA_L]);
+
+      await service.update('p1', {
+        variants: [
+          { id: TALLA_M.id, name: 'Talla M' },
+          { id: TALLA_L.id, name: 'Talla L' },
+          { name: 'Talla XL' },
+        ],
+      } as never);
+
+      expect(created).toEqual([{ name: 'Talla XL' }]);
+    });
+
+    it('una variante nueva sobre un producto con presentaciones siembra sus existencias', async () => {
+      const { service, tx, created } = build([TALLA_M]);
+
+      await service.update(
+        'p1',
+        { variants: [{ id: TALLA_M.id, name: 'Talla M' }, { name: 'Talla XL', stock: 7 }] } as never,
+      );
+
+      expect(created).toEqual([{ name: 'Talla XL' }]);
+      expect(tx.branch.findMany).toHaveBeenCalled();
+    });
   });
 
   /**
@@ -132,13 +201,18 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
    */
   describe('los valores capturados solo alcanzan a la sucursal en contexto', () => {
     it('una variante nueva estrena su precio solo en la sucursal en contexto', async () => {
-      const { service, seeded } = build([DEFAULT_VARIANT], {
+      // Con una presentacion ya configurada, la nueva se CREA (no promueve la
+      // default, que en este producto ya fue promovida).
+      const { service, seeded } = build([TALLA_M], {
         branchId: 'b-centro',
         branches: ['b-centro', 'b-norte'],
       });
 
       await service.update('p1', {
-        variants: [{ name: 'Talla XL', stock: 7, price: 250, cost: 100 }],
+        variants: [
+          { id: TALLA_M.id, name: 'Talla M' },
+          { name: 'Talla XL', stock: 7, price: 250, cost: 100 },
+        ],
       } as never);
 
       // La sucursal en contexto recibe lo capturado…
@@ -197,12 +271,46 @@ describe('ProductsService.update — sincronización de variantes sin pérdida d
     });
   });
 
-  it('quitar todas las variantes con nombre nunca borra la default', async () => {
+  it('quitar todas las variantes con nombre nunca borra la default heredada', async () => {
     const { service, deleted } = build([DEFAULT_VARIANT, TALLA_M]);
 
     await service.update('p1', { variants: [] } as never);
 
     expect(deleted).toEqual([[TALLA_M.id]]);
     expect(deleted.flat()).not.toContain(DEFAULT_VARIANT.id);
+  });
+
+  /**
+   * Camino inverso de la promocion. Todo producto tiene SIEMPRE exactamente una
+   * variante: sin ella no es direccionable en el inventario y deja de ser
+   * vendible, y borrarla arrastraria en cascada sus filas de existencias.
+   */
+  describe('degradacion de la ultima presentacion', () => {
+    it('quitar la ultima la devuelve a default en vez de borrarla', async () => {
+      const { service, updated, deleted } = build([TALLA_M]);
+
+      await service.update('p1', { variants: [] } as never);
+
+      expect(updated).toEqual([{ id: TALLA_M.id, name: null, isDefault: true }]);
+      expect(deleted).toEqual([]);
+    });
+
+    it('quitar varias conserva una como default y borra el resto', async () => {
+      const { service, updated, deleted } = build([TALLA_M, TALLA_L]);
+
+      await service.update('p1', { variants: [] } as never);
+
+      expect(updated).toEqual([{ id: TALLA_M.id, name: null, isDefault: true }]);
+      expect(deleted).toEqual([[TALLA_L.id]]);
+    });
+
+    it('quitar una de dos no degrada nada: la otra sobrevive como presentacion', async () => {
+      const { service, updated, deleted } = build([TALLA_M, TALLA_L]);
+
+      await service.update('p1', { variants: [{ id: TALLA_M.id, name: 'Talla M' }] } as never);
+
+      expect(deleted).toEqual([[TALLA_L.id]]);
+      expect(updated).toEqual([{ id: TALLA_M.id, name: 'Talla M', isDefault: undefined }]);
+    });
   });
 });

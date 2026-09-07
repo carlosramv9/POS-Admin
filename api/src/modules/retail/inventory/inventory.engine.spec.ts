@@ -42,15 +42,23 @@ function makeTx() {
       findFirst: jest.fn().mockResolvedValue({ ...PRODUCT_ROW }),
       findUnique: jest.fn().mockResolvedValue({ ...PRODUCT_ROW }),
     },
-    // Variante del producto. Con `where.id` responde a la comprobación de
-    // propiedad de una variante explícita; sin él, a la búsqueda de la default
-    // — la línea implícita "el producto en sí".
+    // Variante del producto.
+    //
+    // `findFirst` responde a la comprobación de propiedad de una variante
+    // explícita (`where.id`). `findMany` es la resolución por omisión: desde la
+    // promoción de la default (ADR-0030, regla 4) el resolver ya no busca
+    // `isDefault`, sino la ÚNICA variante del producto — devolver dos hace que
+    // exija `variantId` al llamador.
     productVariant: {
       // Los tests que ejercitan el fallback legacy la anulan con
       // `mockResolvedValue(null)`, de ahí el tipo nullable.
       findFirst: jest.fn(
         ({ where }: { where: { productId: string; id?: string } }): Promise<{ id: string } | null> =>
           Promise.resolve({ id: where.id ?? `v-${where.productId}` }),
+      ),
+      findMany: jest.fn(
+        ({ where }: { where: { productId: string } }): Promise<{ id: string }[]> =>
+          Promise.resolve([{ id: `v-${where.productId}` }]),
       ),
       create: jest.fn().mockResolvedValue({ id: 'v-nueva' }),
     },
@@ -131,13 +139,18 @@ describe('InventoryEngine', () => {
   });
 
   describe('applyProductStockDelta — resolución de la llave (sucursal, variante)', () => {
-    it('sin variante ni sucursal explícitas → usa la variante default y la sucursal isMain', async () => {
+    it('sin variante ni sucursal explícitas → usa la única del producto y la sucursal isMain', async () => {
       const tx = makeTx();
       await engine.applyProductStockDelta(tx as never, { productId: 'p1', tenantId: 't1', delta: -2 });
 
-      expect(tx.productVariant.findFirst).toHaveBeenCalledWith({
-        where: { productId: 'p1', isDefault: true, product: { tenantId: 't1' } },
-        select: { id: true },
+      // Ya no se busca `isDefault`: desde la promoción (ADR-0030, regla 4) un
+      // producto con presentaciones no tiene default, y filtrar por ella
+      // devolvía null y tiraba el movimiento al camino legacy.
+      expect(tx.productVariant.findMany).toHaveBeenCalledWith({
+        where: { productId: 'p1', product: { tenantId: 't1' } },
+        select: { id: true, isDefault: true, name: true },
+        orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+        take: 2,
       });
       expect(tx.branch.findFirst).toHaveBeenCalledWith({
         where: { tenantId: 't1', isMain: true },
@@ -339,9 +352,9 @@ describe('InventoryEngine', () => {
   });
 
   describe('applyProductStockDelta — fallback legacy sobre Product.stock', () => {
-    it('producto sin variante default → resta guardada sobre Product.stock', async () => {
+    it('producto sin ninguna variante → resta guardada sobre Product.stock', async () => {
       const tx = makeTx();
-      tx.productVariant.findFirst.mockResolvedValue(null);
+      tx.productVariant.findMany.mockResolvedValue([]);
       tx.product.updateMany.mockResolvedValue({ count: 1 });
 
       const ok = await engine.applyProductStockDelta(tx as never, {
@@ -373,7 +386,7 @@ describe('InventoryEngine', () => {
 
     it('legacy con guard y stock insuficiente → devuelve false sin mutar', async () => {
       const tx = makeTx();
-      tx.productVariant.findFirst.mockResolvedValue(null);
+      tx.productVariant.findMany.mockResolvedValue([]);
       tx.product.updateMany.mockResolvedValue({ count: 0 });
 
       const ok = await engine.applyProductStockDelta(tx as never, {
@@ -415,9 +428,9 @@ describe('InventoryEngine', () => {
       expect(tx.branchInventory.create).not.toHaveBeenCalled();
     });
 
-    it('sin variante default → no-op', async () => {
+    it('sin ninguna variante → no-op', async () => {
       const tx = makeTx();
-      tx.productVariant.findFirst.mockResolvedValue(null);
+      tx.productVariant.findMany.mockResolvedValue([]);
       await engine.applyBranchInventoryDelta(tx as never, 'b1', 'p1', 't1', -2);
       expect(tx.branchInventory.updateMany).not.toHaveBeenCalled();
       expect(tx.branchInventory.create).not.toHaveBeenCalled();

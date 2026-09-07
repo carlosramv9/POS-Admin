@@ -4,7 +4,7 @@
 **Alcance:** `orbix-admin/` · `api/src/modules/retail/products`, `retail/inventory`, `retail/purchases`, `core/branches`, `core/store` · `apps/pos-web/` · `web/`
 **Origen:** auditoría del módulo de productos (variantes), 2026-09-05
 **Decisión de referencia:** ADR-0030 *Variante por defecto obligatoria como unidad vendible (Orbix)* — aceptada 2026-08-17, entregada en fase *expand* 2026-08-18, *contract* pendiente
-**Estado del plan:** Fase 0 implementada (2026-09-05). Fases 1–3 pendientes.
+**Estado del plan:** Fases 0, 1 y 2 implementadas (2026-09-05/07). Fase 3 (contract) pendiente.
 
 > Convenciones: **Confirmado** = respaldado por código citado en la auditoría. **Bloqueante** = no se puede desplegar la fase siguiente sin esto. **S/M/L** = tamaño relativo de la entrega.
 
@@ -156,7 +156,7 @@ La última fila deja ver lo que la fase 0 **no** arregla: la default conserva su
 
 ---
 
-## Fase 1 — `variantId` en la cadena — **prerequisito de todo lo demás**
+## Fase 1 — `variantId` en la cadena — ✅ implementada (f521a0d, 4b690ec)
 
 ### 1.1 Migración expand (aditiva, revertible)
 
@@ -222,7 +222,7 @@ API antes que POS. La API con `variantId` opcional acepta al POS viejo sin cambi
 
 ---
 
-## Fase 2 — Promoción de la default (la regla 2)
+## Fase 2 — Promoción de la default (la regla 2) — ✅ implementada
 
 Solo después de que la fase 1 esté estable en producción.
 
