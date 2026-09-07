@@ -7,16 +7,17 @@ import { CartPanel } from './components/CartPanel'
 import { CustomerDialog } from './components/CustomerDialog'
 import { DiscountDialog } from './components/DiscountDialog'
 import { SuspendedDialog } from './components/SuspendedDialog'
+import { VariantDialog } from './components/VariantDialog'
 import { CheckoutDialog } from '~/modules/checkout/CheckoutDialog'
 import { useCatalog } from '~/hooks/use-catalog'
 import { useDebounced } from '~/hooks/use-debounced'
 import { useCheckout } from '~/hooks/use-checkout'
-import { useCartStore } from '~/stores/cart-store'
+import { useCartStore, sellableVariants } from '~/stores/cart-store'
 import { useCashStore } from '~/stores/cash-store'
 import { useAuthStore } from '~/stores/session-store'
 import { previewTotals } from '~/services/order-totals'
 import { toast } from '~/components/ui/Toast'
-import type { Product } from '~/services/orbix'
+import type { Product, ProductVariant } from '~/services/orbix'
 
 /**
  * Pantalla principal del POS: catálogo a la izquierda, venta en curso a la
@@ -37,6 +38,8 @@ export function PosScreen() {
   const [discountOpen, setDiscountOpen] = useState(false)
   const [suspendedOpen, setSuspendedOpen] = useState(false)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
+  /** Producto a la espera de que el cajero elija presentación. */
+  const [variantPick, setVariantPick] = useState<Product | null>(null)
 
   const lines = useCartStore((s) => s.lines)
   const discount = useCartStore((s) => s.discount)
@@ -57,7 +60,23 @@ export function PosScreen() {
 
   const onAdd = useCallback(
     (product: Product) => {
+      // Con varias presentaciones no se puede adivinar cuál se está vendiendo:
+      // cada una tiene su precio y su existencia. Se pregunta antes de agregar,
+      // en vez de cargar la venta a la línea default.
+      if (sellableVariants(product).length > 0) {
+        setVariantPick(product)
+        return
+      }
       const res = addToCart(product)
+      if (!res.ok) toast(res.reason ?? 'No se pudo agregar el producto', 'error')
+    },
+    [addToCart],
+  )
+
+  const onPickVariant = useCallback(
+    (product: Product, variant: ProductVariant) => {
+      setVariantPick(null)
+      const res = addToCart(product, variant)
       if (!res.ok) toast(res.reason ?? 'No se pudo agregar el producto', 'error')
     },
     [addToCart],
@@ -168,6 +187,8 @@ export function PosScreen() {
       />
 
       <SuspendedDialog open={suspendedOpen} onClose={() => setSuspendedOpen(false)} />
+
+      <VariantDialog product={variantPick} onClose={() => setVariantPick(null)} onPick={onPickVariant} />
 
       {checkoutOpen && <CheckoutDialog checkout={checkout} onClose={() => setCheckoutOpen(false)} onCompleted={onCompleted} />}
     </div>

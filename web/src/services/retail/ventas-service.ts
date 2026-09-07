@@ -71,6 +71,12 @@ export interface ListResponse<T> {
 export interface CreateOrderItemInput {
   itemType?: 'PRODUCT' | 'SERVICE'
   productId?: string
+  /**
+   * Variante vendida. Omitirla significa la default —"el producto en sí"—, que
+   * es el caso de todo producto que nunca se dividió en presentaciones. De ella
+   * depende de qué existencia se descuenta.
+   */
+  variantId?: string
   serviceId?: string
   name?: string
   description?: string

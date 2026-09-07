@@ -139,6 +139,9 @@ export function useCheckout(totalsContext: TotalsContext) {
       const lineDiscount = discountByLine.get(line.key)
       return {
         productId: line.productId,
+        // Sin esto el backend carga la venta a la variante default y la
+        // presentación que el cajero eligió no se descuenta nunca.
+        ...(line.variantId ? { variantId: line.variantId } : {}),
         quantity: line.qty,
         price: line.unitPrice,
         ...(lineDiscount ? { discount: lineDiscount } : {}),

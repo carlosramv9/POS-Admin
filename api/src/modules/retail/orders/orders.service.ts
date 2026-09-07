@@ -104,6 +104,55 @@ export class OrdersService {
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
+    // Variantes nombradas por las líneas. Se cargan de una vez para tres cosas:
+    // validar que cada una sea de SU producto y de este tenant (el id viaja en
+    // el body), comparar el precio contra el de la variante y no el del
+    // producto, y guardar su nombre en la línea de la orden.
+    const lineVariantIds = [
+      ...new Set(productItems.map((i) => i.variantId).filter((v): v is string => !!v)),
+    ];
+    const orderBranchId = this.tenantContext.getBranchId() ?? null;
+    const lineVariants = lineVariantIds.length
+      ? await this.prisma.productVariant.findMany({
+          where: { id: { in: lineVariantIds }, product: { tenantId } },
+          select: {
+            id: true,
+            name: true,
+            productId: true,
+            price: true,
+            branchInventory: orderBranchId
+              ? { where: { branchId: orderBranchId }, select: { price: true } }
+              : false,
+          },
+        })
+      : [];
+    const variantMap = new Map(lineVariants.map((v) => [v.id, v]));
+
+    // Falla cerrado: una variante inexistente, de otro producto o de otra
+    // organización se rechaza, en vez de venderse en silencio contra la default.
+    for (const item of productItems) {
+      if (!item.variantId) continue;
+      const variant = variantMap.get(item.variantId);
+      if (!variant || variant.productId !== item.productId) {
+        throw new NotFoundException(`Variante no encontrada en el producto: ${item.variantId}`);
+      }
+    }
+
+    /**
+     * Precio de catálogo de una línea. Con variante es el de ELLA —el de la
+     * sucursal en contexto, con respaldo en el legacy de la variante—, no el del
+     * producto: si no, vender una talla a su propio precio disparaba el guard de
+     * sobreprecio y exigía permiso de override en cada venta.
+     */
+    const catalogPriceOf = (item: { productId?: string; variantId?: string }): number | null => {
+      const product = item.productId ? productMap.get(item.productId) : undefined;
+      if (!product) return null;
+      const variant = item.variantId ? variantMap.get(item.variantId) : undefined;
+      if (!variant) return Number(product.price);
+      const branchPrice = variant.branchInventory?.[0]?.price;
+      return Number(branchPrice ?? variant.price ?? product.price);
+    };
+
     // El precio de línea es del cliente (`item.price`) con la única
     // restricción `@Min(0)` — nunca se comparaba contra el catálogo. Cobrar
     // lo que el cajero quiera es el fraude de POS más clásico (H-05): se
@@ -114,8 +163,8 @@ export class OrdersService {
     for (const item of productItems) {
       const product = productMap.get(item.productId!);
       if (!product) continue;
-      const catalogPrice = Number(product.price);
-      if (Math.abs(item.price - catalogPrice) > 0.01) {
+      const catalogPrice = catalogPriceOf(item);
+      if (catalogPrice != null && Math.abs(item.price - catalogPrice) > 0.01) {
         priceOverrides.push({ productId: product.id, catalogPrice, chargedPrice: item.price });
       }
     }
@@ -353,7 +402,11 @@ export class OrdersService {
             // Qué variante se vendió. Sin esto la orden solo decía el producto,
             // y ni la devolución ni los reportes podían saber la talla.
             variantId: item.variantId ?? null,
-            name: product.name,
+            // `name` es una instantánea: lo que se imprime en el ticket y lo que
+            // sobrevive si el producto o la variante se renombran después.
+            name: item.variantId
+              ? `${product.name} — ${variantMap.get(item.variantId)?.name ?? ''}`.trim().replace(/ —$/, '')
+              : product.name,
             sku: product.sku,
             description: item.description ?? null,
             quantity: item.quantity,

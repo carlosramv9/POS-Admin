@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Cliente, Product } from '~/services/orbix'
+import type { Cliente, Product, ProductVariant } from '~/services/orbix'
 
 /**
  * Carrito de la venta en curso. Es estado de cliente puro: nada de esto existe
@@ -13,9 +13,20 @@ import type { Cliente, Product } from '~/services/orbix'
 export type CartLineType = 'PRODUCT' | 'SERVICE'
 
 export interface CartLine {
-  /** Clave estable de la línea dentro del carrito. */
+  /**
+   * Clave estable de la línea dentro del carrito.
+   *
+   * Lleva la variante, no solo el producto: dos presentaciones del mismo
+   * artículo son dos renglones distintos, con su propio precio y su propia
+   * existencia. Con la clave por producto, agregar una talla L sumaba cantidad
+   * al renglón de la M.
+   */
   key: string
   productId: string
+  /** Variante vendida; null cuando el producto no se divide en presentaciones. */
+  variantId: string | null
+  /** Nombre de la variante, para el renglón y el ticket. */
+  variantName: string | null
   type: CartLineType
   name: string
   sku: string
@@ -69,7 +80,11 @@ interface CartState {
   discount: number
   suspended: SuspendedSale[]
 
-  add: (product: Product) => AddResult
+  /**
+   * Agrega un producto. `variant` es la presentación elegida; sin ella la venta
+   * va contra la línea default del producto, como siempre.
+   */
+  add: (product: Product, variant?: ProductVariant | null) => AddResult
   setQty: (key: string, qty: number) => AddResult
   increment: (key: string) => AddResult
   decrement: (key: string) => void
@@ -86,27 +101,42 @@ interface CartState {
 
 const stockOf = (p: Product): number => (p.trackInventory ? Number(p.stock ?? 0) : Number.POSITIVE_INFINITY)
 
+/**
+ * Existencia y precio efectivos del renglón: los de la variante cuando el
+ * cajero eligió una, y los del producto cuando no.
+ */
+const stockOfLine = (p: Product, v?: ProductVariant | null): number =>
+  !p.trackInventory ? Number.POSITIVE_INFINITY : v ? Number(v.stock ?? 0) : stockOf(p)
+
+const priceOfLine = (p: Product, v?: ProductVariant | null): number =>
+  Number(v?.price ?? p.price)
+
+/** Las presentaciones vendibles: la default es interna y nunca se ofrece. */
+export const sellableVariants = (p: Product): ProductVariant[] =>
+  (p.variants ?? []).filter((v) => !v.isDefault && (v.name ?? '').trim() !== '')
+
 export const useCartStore = create<CartState>((set, get) => ({
   lines: [],
   customer: null,
   discount: 0,
   suspended: readSuspended(),
 
-  add: (product) => {
+  add: (product, variant) => {
     if (!product.id) return { ok: false, reason: 'El producto no tiene identificador' }
-    const stock = stockOf(product)
-    const key = product.id
+    const stock = stockOfLine(product, variant)
+    const key = variant?.id ? `${product.id}::${variant.id}` : product.id
+    const label = variant?.name ? `${product.name} — ${variant.name}` : product.name
     const existing = get().lines.find((l) => l.key === key)
 
     if (existing) {
       if (existing.qty + 1 > stock) {
-        return { ok: false, reason: `Stock máximo de "${product.name}" alcanzado (${stock} disponibles)` }
+        return { ok: false, reason: `Stock máximo de "${label}" alcanzado (${stock} disponibles)` }
       }
       set({ lines: get().lines.map((l) => (l.key === key ? { ...l, qty: l.qty + 1 } : l)) })
       return { ok: true }
     }
 
-    if (stock <= 0) return { ok: false, reason: `"${product.name}" sin stock disponible` }
+    if (stock <= 0) return { ok: false, reason: `"${label}" sin stock disponible` }
 
     set({
       lines: [
@@ -114,10 +144,12 @@ export const useCartStore = create<CartState>((set, get) => ({
         {
           key,
           productId: product.id,
+          variantId: variant?.id ?? null,
+          variantName: variant?.name ?? null,
           type: 'PRODUCT',
           name: product.name,
           sku: product.sku,
-          unitPrice: Number(product.price),
+          unitPrice: priceOfLine(product, variant),
           qty: 1,
           stock,
         },

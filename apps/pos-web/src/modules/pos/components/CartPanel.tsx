@@ -217,7 +217,14 @@ function CartRow({ line }: { line: CartLine }) {
   return (
     <div style={{ padding: '13px 18px', borderBottom: '1px solid var(--hairline)', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>{line.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>
+          {line.name}
+          {/* La presentación va en el renglón: dos variantes del mismo producto
+              son dos líneas, y sin el nombre el cajero no las distingue. */}
+          {line.variantName && (
+            <span style={{ fontWeight: 500, color: 'var(--muted-foreground)' }}> — {line.variantName}</span>
+          )}
+        </div>
         <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginTop: 2 }}>
           {line.sku} · {money(line.unitPrice)} c/u
         </div>

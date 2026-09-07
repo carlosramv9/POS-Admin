@@ -133,6 +133,10 @@ export function Inventario() {
         }
         const pct = r.trackInventory ? Math.min((r.stock / (r.lowStockAlert * 4)) * 100, 100) : 100
         const color = !r.trackInventory ? "#16a34a" : r.stock > r.lowStockAlert ? "#16a34a" : r.stock > 0 ? "#d97706" : "#dc2626"
+        // Con presentaciones, el número de arriba es la SUMA de todas. Se
+        // desglosa: es lo que se repone y lo que se cuenta, y un total agregado
+        // no dice de cuál falta.
+        const presentaciones = (r.variants ?? []).filter(v => !v.isDefault && (v.name ?? '').trim() !== '')
         return (
           <div className="flex flex-col items-center gap-1">
             <span className="font-bold text-sm" style={{ color }}>{r.stock}</span>
@@ -143,6 +147,15 @@ export function Inventario() {
                 </div>
                 <span className="text-[10px] text-muted-foreground">mín: {r.lowStockAlert}</span>
               </>
+            )}
+            {presentaciones.length > 0 && (
+              <div className="flex flex-col items-center gap-0.5 mt-0.5">
+                {presentaciones.map(v => (
+                  <span key={v.id ?? v.name} className="text-[10px] text-muted-foreground leading-tight">
+                    {v.name}: <span className="font-semibold text-foreground">{v.stock ?? 0}</span>
+                  </span>
+                ))}
+              </div>
             )}
           </div>
         )
