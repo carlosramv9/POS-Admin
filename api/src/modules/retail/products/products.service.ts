@@ -249,24 +249,45 @@ export class ProductsService {
       // UNA, nunca todas: el stock inicial no se replica (ver seedBranchInventory).
       const stockBranchId = await this.variantResolver.resolveBranchId(tx, tenantId, branchId);
 
-      // Toda alta necesita su variante default — la línea implícita "el producto
-      // en sí", que es la que lleva el inventario — y una fila de existencias por
-      // cada sucursal activa. Sin esas filas el producto nacería invendible.
+      // Toda alta necesita al menos una variante — la que lleva el inventario —
+      // y una fila de existencias por cada sucursal activa. Sin esas filas el
+      // producto nacería invendible.
+      //
+      // ADR-0030, regla 4: la default es "el producto en sí" y SE PROMUEVE en
+      // cuanto hay presentaciones. Cuando el alta ya trae variantes con nombre
+      // —el formulario móvil las captura en el mismo paso—, la primera nace
+      // siendo esa presentación en vez de crearse al lado de una default vacía.
+      // Crear las dos dejaba una línea fantasma sin nombre cargando existencia
+      // y siendo la que el resolver elige por omisión, exactamente lo que la
+      // promoción elimina en `update`.
+      const [primeraConNombre, ...resto] = variants ?? [];
+      const naceConPresentacion = primeraConNombre !== undefined;
+
       const defaultVariant = await tx.productVariant.create({
         data: {
           productId: created.id,
-          name: null,
-          isDefault: true,
+          name: naceConPresentacion ? primeraConNombre.name : null,
+          isDefault: !naceConPresentacion,
           trackInventory: created.trackInventory,
-          cost: created.costPrice ?? 0,
-          price: created.price,
+          cost: naceConPresentacion ? (primeraConNombre.cost ?? 0) : (created.costPrice ?? 0),
+          price: naceConPresentacion ? (primeraConNombre.price ?? 0) : created.price,
         },
         select: { id: true },
       });
-      await this.seedBranchInventory(tx, tenantId, created, [defaultVariant.id], {
-        branchId: stockBranchId,
-        stock: created.stock,
-      });
+      await this.seedBranchInventory(
+        tx,
+        tenantId,
+        created,
+        [defaultVariant.id],
+        naceConPresentacion
+          ? {
+              branchId: stockBranchId,
+              stock: primeraConNombre.stock ?? 0,
+              price: primeraConNombre.price,
+              cost: primeraConNombre.cost,
+            }
+          : { branchId: stockBranchId, stock: created.stock },
+      );
 
       if (type === 'RECIPE' && recipeItems?.length) {
         await this.assertSuppliesInTenant(tx, tenantId, recipeItems.map((i) => i.supplyId));
@@ -298,11 +319,14 @@ export class ProductsService {
         });
       }
 
-      if (variants?.length) {
+      if (resto.length) {
         // Una a una, no `createMany`: cada variante siembra sus existencias con
         // SUS valores, y `createMany` no devuelve ids — releerlas después
         // perdería la correspondencia con la fila del DTO de la que salieron.
-        for (const variant of variants) {
+        //
+        // `resto`, no `variants`: la primera ya se aplicó sobre la variante de
+        // arriba (ver la promoción al nacer).
+        for (const variant of resto) {
           const createdVariant = await tx.productVariant.create({
             data: {
               productId: created.id,

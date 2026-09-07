@@ -124,29 +124,57 @@ describe('ProductsService.create — la existencia inicial no se replica por suc
     }
   });
 
-  it('las variantes con nombre siembran SU existencia, y solo en la sucursal destino', async () => {
-    const { service, seeded } = build({ branches: ['b1', 'b2'], contextBranchId: 'b1' });
+  /**
+   * ADR-0030, regla 4, aplicada YA EN EL ALTA. El formulario movil captura las
+   * presentaciones en el mismo paso que el producto, asi que el alta llega con
+   * ellas: la primera nace SIENDO la variante, no al lado de una default vacia.
+   * Crear las dos dejaba una linea fantasma sin nombre cargando existencia y
+   * siendo la que el resolver elige por omision.
+   */
+  it('el alta con presentaciones no crea una default fantasma', async () => {
+    const { service, seeded, createdVariants } = build({
+      branches: ['b1', 'b2'],
+      contextBranchId: 'b1',
+    });
 
     await service.create({
       ...dto,
       stock: 10,
-      variants: [{ name: 'Talla M', price: 150, cost: 70, stock: 4 }],
+      variants: [
+        { name: 'Talla M', price: 150, cost: 70, stock: 4 },
+        { name: 'Talla L', price: 160, cost: 75, stock: 3 },
+      ],
     });
 
-    // La default se lleva las 10 del producto en b1; la M se lleva sus 4, también
-    // en b1. Ninguna cantidad aparece dos veces.
-    const porSucursal = seeded.map((row) => ({
-      branchId: row.branchId,
-      variantId: row.variantId,
-      stock: row.stock,
-    }));
-    expect(porSucursal).toEqual([
-      { branchId: 'b1', variantId: 'v-1', stock: 10 },
+    // Dos variantes, ambas con nombre, ninguna marcada como default.
+    expect(createdVariants).toEqual([
+      { name: 'Talla M', isDefault: false },
+      { name: 'Talla L', isDefault: undefined },
+    ]);
+
+    // Cada una con SU existencia, y solo en la sucursal destino. El `stock: 10`
+    // del producto se ignora: con presentaciones, lo inventariable son ellas.
+    expect(
+      seeded.map((row) => ({ branchId: row.branchId, variantId: row.variantId, stock: row.stock })),
+    ).toEqual([
+      { branchId: 'b1', variantId: 'v-1', stock: 4 },
       { branchId: 'b2', variantId: 'v-1', stock: 0 },
-      { branchId: 'b1', variantId: 'v-2', stock: 4 },
+      { branchId: 'b1', variantId: 'v-2', stock: 3 },
       { branchId: 'b2', variantId: 'v-2', stock: 0 },
     ]);
-    expect(seeded.reduce((total, row) => total + row.stock, 0)).toBe(14);
+    expect(seeded.reduce((total, row) => total + row.stock, 0)).toBe(7);
+  });
+
+  it('el alta SIN presentaciones si crea la default, con el stock del producto', async () => {
+    const { service, createdVariants, seeded } = build({
+      branches: ['b1'],
+      contextBranchId: 'b1',
+    });
+
+    await service.create(dto);
+
+    expect(createdVariants).toEqual([{ name: null, isDefault: true }]);
+    expect(seeded).toEqual([expect.objectContaining({ branchId: 'b1', stock: 10 })]);
   });
 
   it('sin filas de inventario el stock es 0, no el espejo legacy del producto', async () => {
