@@ -424,7 +424,6 @@ export const pt: TranslationSchema = {
       removeConfirmTitle: 'Remover a variação?',
       removeConfirmDescription:
         '"{{name}}" será excluída junto com seu estoque em todas as filiais. Esta ação não pode ser desfeita.',
-      nonSimpleHint: 'Este tipo de produto não usa variações.',
     },
     serviceInventoryHint: 'Serviços não controlam estoque diretamente. Apenas a venda é registrada.',
     nonSimpleInventoryHint: 'Este tipo de produto não tem estoque próprio.',

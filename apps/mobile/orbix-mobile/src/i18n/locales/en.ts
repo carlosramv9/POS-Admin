@@ -424,7 +424,6 @@ export const en: TranslationSchema = {
       removeConfirmTitle: 'Remove this variant?',
       removeConfirmDescription:
         '"{{name}}" and its stock in every branch will be deleted. This cannot be undone.',
-      nonSimpleHint: 'This product type does not use variants.',
     },
     serviceInventoryHint: 'Services don\'t track inventory directly. Only the sale is recorded.',
     nonSimpleInventoryHint: 'This product type doesn\'t carry its own stock.',

@@ -586,7 +586,7 @@ function VariantsEditor({
 
 // One step per `products.section*` label already in the locale files —
 // see the file-level comment for why the split lands here.
-const STEP_IDS = ['general', 'pricing', 'category', 'inventory', 'variants', 'visibility'] as const;
+const STEP_IDS = ['general', 'pricing', 'category', 'inventory', 'visibility'] as const;
 type StepId = (typeof STEP_IDS)[number];
 
 /** Fields validated before leaving a step — keeps `trigger()` scoped per step. */
@@ -594,18 +594,16 @@ const STEP_FIELDS: Record<StepId, FieldPath<ProductFormValues>[]> = {
   general: ['type', 'sku', 'name', 'description'],
   pricing: ['price', 'comparePrice', 'costPrice', 'taxRate', 'taxCode'],
   category: ['categoryId'],
-  inventory: ['trackInventory', 'stock', 'lowStockAlert'],
-  variants: ['variants'],
+  inventory: ['trackInventory', 'stock', 'lowStockAlert', 'variants'],
   visibility: ['status', 'isEcommerce'],
 };
 
 /** `products.section*` — same labels the fields used to sit under in one long scroll. */
-const STEP_TITLE_KEYS: Record<StepId, 'products.sectionGeneral' | 'products.sectionPricing' | 'products.sectionCategory' | 'products.sectionInventory' | 'products.sectionVariants' | 'products.sectionVisibility'> = {
+const STEP_TITLE_KEYS: Record<StepId, 'products.sectionGeneral' | 'products.sectionPricing' | 'products.sectionCategory' | 'products.sectionInventory' | 'products.sectionVisibility'> = {
   general: 'products.sectionGeneral',
   pricing: 'products.sectionPricing',
   category: 'products.sectionCategory',
   inventory: 'products.sectionInventory',
-  variants: 'products.sectionVariants',
   visibility: 'products.sectionVisibility',
 };
 
@@ -649,7 +647,16 @@ export function ProductForm({
   // ninguna opción vendible. En edición tampoco se muestra: el servidor rechaza
   // el campo en el PATCH y la existencia se mueve por ajustes de inventario.
   const namedVariants = useWatch({ control, name: 'variants' });
-  const showProductStock = !isEditing && (namedVariants?.length ?? 0) === 0;
+  /**
+   * Con presentaciones configuradas, la existencia se captura en cada una y el
+   * campo del producto deja de aceptar escritura. Se queda visible en vez de
+   * desaparecer: un campo que se esfuma al agregar la primera variante parece
+   * un fallo, y deshabilitado se ve que el dato ahora vive en otro sitio.
+   *
+   * Al editar tampoco se escribe desde aquí: la existencia se mueve por
+   * movimientos de inventario.
+   */
+  const stockEditable = !isEditing && (namedVariants?.length ?? 0) === 0;
   const isSimple = type === ProductType.SIMPLE;
 
   const [stepIndex, setStepIndex] = useState(0);
@@ -837,17 +844,39 @@ export function ProductForm({
                 onValueChange={(v) => setValue('trackInventory', v, { shouldValidate: false })}
               />
               {trackInventory ? (
-                <View style={{ flexDirection: 'row', gap: theme.spacing.sm + 2 }}>
-                  {showProductStock ? (
+                <>
+                  <View style={{ flexDirection: 'row', gap: theme.spacing.sm + 2 }}>
                     <View style={{ flex: 1 }}>
-                      <OrbixTextField control={control} name="stock" label={t('products.fields.stock')} keyboardType="number-pad" />
+                      <OrbixTextField
+                        control={control}
+                        name="stock"
+                        label={t('products.fields.stock')}
+                        keyboardType="number-pad"
+                        editable={stockEditable}
+                      />
                     </View>
-                  ) : null}
-                  <View style={{ flex: 1 }}>
-                    <OrbixTextField control={control} name="lowStockAlert" label={t('products.fields.lowStockAlert')} keyboardType="number-pad" />
+                    <View style={{ flex: 1 }}>
+                      <OrbixTextField control={control} name="lowStockAlert" label={t('products.fields.lowStockAlert')} keyboardType="number-pad" />
+                    </View>
                   </View>
-                </View>
+
+                </>
               ) : null}
+
+              {/*
+                Las presentaciones viven en este mismo paso, no en uno aparte:
+                "cuánto hay" y "de cuál" son la misma decisión, y separarlas
+                obligaba a avanzar una pantalla para descubrir que el campo de
+                arriba ya no aplicaba.
+
+                Fuera del `trackInventory`: una presentación es una línea con su
+                propio precio, así que sigue teniendo sentido en un producto que
+                no controla existencias.
+              */}
+              <OrbixText size="xs" weight="semibold" tone="mutedForeground">
+                {t('products.sectionVariants')}
+              </OrbixText>
+              <VariantsEditor control={control} getValues={getValues} branchScoped={branchScoped} />
             </>
           ) : (
             <View
@@ -859,26 +888,6 @@ export function ProductForm({
             >
               <OrbixText size="xs" tone="mutedForeground">
                 {t(type === ProductType.SERVICE ? 'products.serviceInventoryHint' : 'products.nonSimpleInventoryHint')}
-              </OrbixText>
-            </View>
-          )}
-        </FieldGroup>
-      ) : null}
-
-      {stepId === 'variants' ? (
-        <FieldGroup>
-          {isSimple ? (
-            <VariantsEditor control={control} getValues={getValues} branchScoped={branchScoped} />
-          ) : (
-            <View
-              style={{
-                padding: theme.spacing.md,
-                borderRadius: theme.radius.lg,
-                backgroundColor: theme.colors.muted,
-              }}
-            >
-              <OrbixText size="xs" tone="mutedForeground">
-                {t('products.variants.nonSimpleHint')}
               </OrbixText>
             </View>
           )}

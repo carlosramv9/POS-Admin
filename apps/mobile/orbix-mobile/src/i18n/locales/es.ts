@@ -426,7 +426,6 @@ export const es = {
       removeConfirmTitle: '¿Quitar la variante?',
       removeConfirmDescription:
         'Se eliminará "{{name}}" junto con su existencia en todas las sucursales. Esta acción no se puede deshacer.',
-      nonSimpleHint: 'Este tipo de producto no maneja variantes.',
     },
     serviceInventoryHint: 'Los servicios no manejan inventario directo. Solo se registra la venta.',
     nonSimpleInventoryHint: 'Este tipo de producto no maneja stock propio.',
