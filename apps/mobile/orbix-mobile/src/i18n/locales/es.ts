@@ -400,6 +400,12 @@ export const es = {
     sectionVisibility: 'Estado y visibilidad',
     variants: {
       add: 'Agregar variante',
+      /** Píldora de estado en la tarjeta de la variante. */
+      stockOut: 'Sin existencia',
+      stockLow: '{{count}} · bajo',
+      stockCount: '{{count}} en existencia',
+      /** Costo al pie del precio, en la tarjeta. */
+      costShort: 'Costo {{value}}',
       /** Tarjeta de una variante todavía sin nombre. */
       untitled: 'Variante sin nombre',
       /** La tarjeta abre la hoja con el formulario. */

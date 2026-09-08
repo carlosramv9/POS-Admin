@@ -45,7 +45,7 @@ import {
   type OrbixBottomSheetRef,
   type SelectOption,
 } from '@/components';
-import { PlusIcon, TrashIcon } from '@/components/ui/icons';
+import { ChevronRightIcon, PlusIcon, TrashIcon } from '@/components/ui/icons';
 import { OrbixGradient } from '@/components/ui/orbix-gradient';
 import { useCreateCategory } from '@/features/products/use-product-mutations';
 import { useAuth } from '@/hooks/use-auth';
@@ -184,6 +184,201 @@ function SwitchRow({ label, hint, value, onValueChange }: { label: string; hint?
 }
 
 /**
+ * Estado de existencia de una presentación, para pintarlo de un vistazo.
+ *
+ * Es el dato accionable de la tarjeta: agotado hay que reponerlo YA, bajo hay
+ * que planearlo. Antes los tres números —precio, costo y existencia— iban en una
+ * misma línea separada por puntos, con el mismo peso visual, así que el único
+ * que exige una decisión se leía igual que el que nunca se mira.
+ */
+function stockState(stock: number, reorderPoint: number): 'out' | 'low' | 'ok' {
+  if (stock <= 0) return 'out';
+  return stock <= reorderPoint ? 'low' : 'ok';
+}
+
+/**
+ * Tarjeta de una presentación: ficha de anaquel, no fila de tabla.
+ *
+ * Jerarquía deliberada, en el orden en que se pregunta detrás de un mostrador:
+ * QUÉ es (el nombre manda), a CUÁNTO se vende (el precio es la cifra grande, a
+ * la derecha y en cifras tabulares para que una pila de tarjetas alinee sus
+ * decimales) y CUÁNTO queda (píldora de color, que es lo que dispara reponer).
+ * El costo baja a pie de precio: es interno y no compite.
+ *
+ * El riel de degradado a la izquierda es lo que hace que la pila se lea como un
+ * juego de presentaciones del mismo producto y no como tarjetas sueltas. Reusa
+ * el gradiente `primary` —el mismo de los botones y de la pestaña activa—, así
+ * que es identidad del producto, no adorno.
+ *
+ * El botón de quitar deja de ser un cuadro relleno en rojo: una acción
+ * destructiva no puede ser lo más llamativo de cada renglón. Queda el glifo en
+ * color de peligro y el fondo solo aparece al presionarlo.
+ */
+function VariantCard({
+  name,
+  price,
+  cost,
+  stock,
+  reorderPoint,
+  onPress,
+  onRemove,
+}: {
+  name: string
+  price: string
+  cost: string
+  stock: string
+  reorderPoint: number
+  onPress: () => void
+  onRemove: () => void
+}) {
+  const theme = useTheme();
+  const { t } = useTranslation();
+
+  const sinNombre = name.trim().length === 0;
+  const unidades = Number(stock) || 0;
+  const estado = stockState(unidades, reorderPoint);
+
+  const pill = {
+    out: { bg: theme.colors.dangerBg, fg: theme.colors.dangerFg, label: t('products.variants.stockOut') },
+    low: { bg: theme.colors.warningBg, fg: theme.colors.warningFg, label: t('products.variants.stockLow', { count: unidades }) },
+    ok: { bg: theme.colors.neutralBg, fg: theme.colors.neutralFg, label: t('products.variants.stockCount', { count: unidades }) },
+  }[estado];
+
+  return (
+    // Cáscara: borde, radio y sombra viven aquí para que el botón de quitar NO
+    // quede anidado dentro del área táctil de la tarjeta. Anidados, Android los
+    // fusiona en un solo nodo de accesibilidad y el lector de pantalla pierde
+    // la acción destructiva; como hermanos, son dos destinos distintos y el
+    // gesto de cada uno es inequívoco.
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        borderRadius: theme.radius.lg,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.card,
+        // Recorta el riel a las esquinas.
+        overflow: 'hidden',
+        ...theme.shadows.sm,
+      }}
+    >
+      {/* Riel de identidad, a sangre por la izquierda. */}
+      <OrbixGradient variant="primary" style={{ width: 4 }} pointerEvents="none" />
+
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={sinNombre ? t('products.variants.untitled') : name}
+        accessibilityHint={t('products.variants.editHint')}
+        accessibilityValue={{ text: pill.label }}
+        // Estilo ESTÁTICO en el Pressable y el layout en un View interno.
+        // El proyecto envuelve los primitivos con `react-native-css-interop`
+        // (se ve como `CssInterop.View` en las trazas), y con un estilo-función
+        // aquí `flex` y `flexDirection` no llegaban a aplicarse: la tarjeta se
+        // encogía a su contenido y lo apilaba en columna. Un View normal sí los
+        // respeta, y el estado de pulsado llega por children-as-function.
+        style={{ flex: 1 }}
+      >
+        {({ pressed }) => (
+          <View
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: theme.spacing.md,
+              paddingVertical: theme.spacing.md,
+              paddingLeft: theme.spacing.md,
+              paddingRight: theme.spacing.sm,
+              // El realce va en la zona que se tocó, no en toda la tarjeta:
+              // deja claro que se abrió la ficha y no el botón de quitar.
+              backgroundColor: pressed ? theme.colors.muted : 'transparent',
+            }}
+          >
+        <View style={{ flex: 1, gap: theme.spacing.xs }}>
+          <OrbixText
+            size="md"
+            weight="semibold"
+            numberOfLines={1}
+            tone={sinNombre ? 'mutedForeground' : undefined}
+            // Una presentación a medio capturar se lee como hueco por llenar,
+            // no como un nombre más.
+            style={sinNombre ? { fontStyle: 'italic' } : undefined}
+          >
+            {sinNombre ? t('products.variants.untitled') : name}
+          </OrbixText>
+
+          <View style={{ flexDirection: 'row' }}>
+            <View
+              style={{
+                paddingHorizontal: theme.spacing.sm,
+                paddingVertical: 3,
+                borderRadius: theme.radius.full,
+                backgroundColor: pill.bg,
+              }}
+            >
+              {/* El texto lleva el estado, no solo el color: sin él, quien no
+                  distingue rojo de ámbar se queda sin la señal. */}
+              <OrbixText size="xs" weight="medium" style={{ color: pill.fg }}>
+                {pill.label}
+              </OrbixText>
+            </View>
+          </View>
+        </View>
+
+        <View style={{ alignItems: 'flex-end', gap: 1 }}>
+          <OrbixText
+            size="md"
+            weight="semibold"
+            numberOfLines={1}
+            // Cifras tabulares: una pila de tarjetas alinea sus decimales en
+            // columna y los precios se comparan de un vistazo.
+            style={{ fontVariant: ['tabular-nums'] }}
+          >
+            {price || '0'}
+          </OrbixText>
+          <OrbixText
+            size="xs"
+            tone="mutedForeground"
+            numberOfLines={1}
+            style={{ fontVariant: ['tabular-nums'] }}
+          >
+            {t('products.variants.costShort', { value: cost || '0' })}
+          </OrbixText>
+        </View>
+
+            <ChevronRightIcon size={16} color={theme.colors.mutedForeground} />
+          </View>
+        )}
+      </Pressable>
+
+      <Pressable
+        onPress={onRemove}
+        accessibilityRole="button"
+        accessibilityLabel={t('products.variants.remove')}
+        // 44 de lado: el mínimo cómodo para el pulgar. Antes eran 36 con
+        // `hitSlop`, que agranda el área pero no lo que se ve, así que el
+        // destino parecía más pequeño de lo que era.
+        style={{ width: 44, alignSelf: 'stretch' }}
+      >
+        {({ pressed }) => (
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? theme.colors.dangerBg : 'transparent',
+            }}
+          >
+            <TrashIcon size={16} color={theme.colors.dangerFg} />
+          </View>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+/**
  * Editor de las variantes con nombre del producto: "Talla M", "Extra queso".
  *
  * La variante **default** nunca aparece aquí. Es la línea interna "el producto
@@ -229,6 +424,9 @@ function VariantsEditor({
   // Se relee en cada render mientras la hoja está abierta: los campos escriben
   // en el mismo formulario, así que la tarjeta de atrás queda al día al cerrar.
   const values = useWatch({ control, name: 'variants' }) ?? [];
+  // Umbral de "existencia baja". Es del PRODUCTO, no de cada presentación: el
+  // punto de reorden se captura una sola vez y vale para todas sus líneas.
+  const reorderPoint = Number(useWatch({ control, name: 'lowStockAlert' })) || 0;
 
   const openSheet = (index: number) => {
     setEditing(index);
@@ -276,60 +474,18 @@ function VariantsEditor({
         // el stock se mueve por movimientos de inventario.
         const persisted = Boolean(field.id);
         const actual = values[index] ?? field;
-        const nombre = (actual.name ?? '').trim();
 
         return (
-          <Pressable
+          <VariantCard
             key={field.key}
+            name={actual.name ?? ''}
+            price={actual.price ?? ''}
+            cost={actual.cost ?? ''}
+            stock={actual.stock ?? ''}
+            reorderPoint={reorderPoint}
             onPress={() => openSheet(index)}
-            accessibilityRole="button"
-            accessibilityLabel={nombre || t('products.variants.untitled')}
-            accessibilityHint={t('products.variants.editHint')}
-            style={({ pressed }) => ({
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: theme.spacing.md,
-              padding: theme.spacing.md,
-              borderRadius: theme.radius.lg,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              // `card` sobre el fondo de la pantalla: en claro levanta la
-              // tarjeta y en oscuro la separa del negro. Sale del tema, así que
-              // sigue el modo del sistema sin ramas por color.
-              backgroundColor: theme.colors.card,
-              opacity: pressed ? 0.7 : 1,
-            })}
-          >
-            <View style={{ flex: 1, gap: 2 }}>
-              <OrbixText size="sm" weight="semibold" numberOfLines={1}>
-                {nombre || t('products.variants.untitled')}
-              </OrbixText>
-              <OrbixText size="xs" tone="mutedForeground" numberOfLines={1}>
-                {[
-                  `${t('products.variants.price')} ${actual.price || '0'}`,
-                  `${t('products.variants.cost')} ${actual.cost || '0'}`,
-                  `${t('products.variants.stock')} ${actual.stock || '0'}`,
-                ].join('  ·  ')}
-              </OrbixText>
-            </View>
-
-            <Pressable
-              onPress={() => requestRemove(index, persisted)}
-              accessibilityRole="button"
-              accessibilityLabel={t('products.variants.remove')}
-              hitSlop={8}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: theme.radius.lg,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: theme.colors.dangerBg,
-              }}
-            >
-              <TrashIcon size={16} color={theme.colors.dangerFg} />
-            </Pressable>
-          </Pressable>
+            onRemove={() => requestRemove(index, persisted)}
+          />
         );
       })}
 

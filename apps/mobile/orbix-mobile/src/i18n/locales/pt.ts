@@ -398,6 +398,12 @@ export const pt: TranslationSchema = {
     sectionVisibility: 'Status e visibilidade',
     variants: {
       add: 'Adicionar variação',
+      /** Píldora de estado en la tarjeta de la variante. */
+      stockOut: 'Sem estoque',
+      stockLow: '{{count}} · baixo',
+      stockCount: '{{count}} em estoque',
+      /** Costo al pie del precio, en la tarjeta. */
+      costShort: 'Custo {{value}}',
       /** Tarjeta de una variante todavía sin nombre. */
       untitled: 'Variante sem nome',
       /** La tarjeta abre la hoja con el formulario. */
