@@ -443,6 +443,8 @@ export const es = {
       type: 'Tipo de producto',
       sku: 'SKU',
       skuPlaceholder: 'Ej. CAM-001',
+      barcode: 'Código de barras',
+      barcodePlaceholder: 'Escanéalo o tecléalo',
       name: 'Nombre',
       namePlaceholder: 'Ej. Camiseta básica',
       description: 'Descripción',

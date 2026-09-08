@@ -1,4 +1,4 @@
-﻿import { IsString, IsNumber, IsOptional, IsEnum, IsBoolean, IsUUID, Min, IsArray, ValidateNested } from 'class-validator';
+﻿import { IsString, IsNumber, IsOptional, IsEnum, IsBoolean, IsUUID, Min, MaxLength, IsArray, ValidateNested } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductStatus, TaxCode, ProductType } from '@prisma/client';
 import { Type, Transform } from 'class-transformer';
@@ -67,6 +67,20 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   trackInventory?: boolean;
+  /**
+   * Código de barras del producto cuando NO se divide en presentaciones: se
+   * guarda en su variante única. Con presentaciones configuradas cada una lleva
+   * el suyo y este campo se ignora.
+   *
+   * El SKU no necesita gemelo aquí: `sku` del producto ya existe y hace de
+   * código padre.
+   */
+  @ApiPropertyOptional({ description: 'Código de barras; único en la empresa' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  barcode?: string;
+
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -441,6 +441,8 @@ export const pt: TranslationSchema = {
       type: 'Tipo de produto',
       sku: 'SKU',
       skuPlaceholder: 'Ex. CAM-001',
+      barcode: 'Código de barras',
+      barcodePlaceholder: 'Escaneie ou digite',
       name: 'Nome',
       namePlaceholder: 'Ex. Camiseta básica',
       description: 'Descrição',

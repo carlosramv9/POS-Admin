@@ -37,6 +37,8 @@ export interface ImageAsset {
 export interface ProductVariant {
   id: string;
   name: string;
+  sku: string;
+  barcode: string;
   cost: number;
   price: number;
   stock: number;
@@ -118,6 +120,9 @@ function toVariant(dto: ProductVariantDto): ProductVariant {
   return {
     id: dto.id,
     name: dto.name ?? '',
+    // `''` y no `null`: el formulario los edita como texto.
+    sku: dto.sku ?? '',
+    barcode: dto.barcode ?? '',
     cost: toNumber(dto.cost) ?? 0,
     price: toNumber(dto.price) ?? 0,
     stock: dto.stock,

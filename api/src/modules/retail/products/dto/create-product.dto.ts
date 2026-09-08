@@ -46,6 +46,24 @@ export class ProductVariantDto {
   stock?: number;
 
   /**
+   * Código de la presentación. ADR-0030 los pone en la variante porque es la
+   * unidad vendible. Ambos opcionales: vacíos, manda el `sku` del producto.
+   *
+   * Únicos por empresa — un duplicado responde 409.
+   */
+  @ApiPropertyOptional({ description: 'SKU de esta presentación; único en la empresa' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  sku?: string;
+
+  @ApiPropertyOptional({ description: 'Código de barras de esta presentación; único en la empresa' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  barcode?: string;
+
+  /**
    * Se envía al editar para poder distinguir una variante existente de una nueva
    * y así conservar sus existencias; sin él, guardar el producto reemplazaría el
    * juego completo de variantes y el stock se perdería.
@@ -169,6 +187,20 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   trackInventory?: boolean;
+  /**
+   * Código de barras del producto cuando NO se divide en presentaciones: se
+   * guarda en su variante única. Con presentaciones configuradas cada una lleva
+   * el suyo y este campo se ignora.
+   *
+   * El SKU no necesita gemelo aquí: `sku` del producto ya existe y hace de
+   * código padre.
+   */
+  @ApiPropertyOptional({ description: 'Código de barras; único en la empresa' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  barcode?: string;
+
 
   @ApiPropertyOptional({ default: 5 })
   @IsOptional()

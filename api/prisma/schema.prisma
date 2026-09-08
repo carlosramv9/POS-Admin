@@ -771,6 +771,15 @@ model ProductVariant {
   id             String  @id @default(uuid())
   productId      String
   name           String?
+  /// Código de la presentación. ADR-0030 pone `sku` y `barcode` en la variante
+  /// porque es la unidad vendible: una talla M y una L son artículos distintos
+  /// al etiquetar, recibir y contar.
+  ///
+  /// Opcional y ADITIVO: `Product.sku` sigue existiendo como código padre, así
+  /// que nada de lo que ya lo usa se rompe. Vacío aquí, manda el del producto.
+  sku            String?
+  /// Código de barras de esta presentación. Mismo criterio que `sku`.
+  barcode        String?
   isDefault      Boolean @default(false)
   // Policy flag: does this variant carry inventory at all? Per-variant rather
   // than per-branch (unlike lowStockAlert, a genuinely branch-level reorder
@@ -790,6 +799,11 @@ model ProductVariant {
   purchaseReceiptItems    PurchaseReceiptItem[]
   storeWhatsappOrderItems StoreWhatsappOrderItem[]
 
+  /// Para resolver un escaneo, no para restringir: la unicidad es POR EMPRESA y
+  /// el tenant vive en el producto, así que no cabe en un índice de esta tabla.
+  /// La impone `ProductsService`.
+  @@index([sku])
+  @@index([barcode])
   @@map("product_variants")
 }
 

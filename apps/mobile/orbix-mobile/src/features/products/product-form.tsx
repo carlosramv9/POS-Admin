@@ -524,6 +524,25 @@ function VariantsEditor({
               <View style={{ flex: 1 }}>
                 <OrbixTextField
                   control={control}
+                  name={`variants.${editing}.sku`}
+                  label={t('products.fields.sku')}
+                  autoCapitalize="characters"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <OrbixTextField
+                  control={control}
+                  name={`variants.${editing}.barcode`}
+                  label={t('products.fields.barcode')}
+                  autoCapitalize="characters"
+                />
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: theme.spacing.sm + 2 }}>
+              <View style={{ flex: 1 }}>
+                <OrbixTextField
+                  control={control}
                   name={`variants.${editing}.cost`}
                   label={t('products.variants.cost')}
                   keyboardType="decimal-pad"
@@ -763,6 +782,21 @@ export function ProductForm({
             autoCapitalize="characters"
             editable={skuEditable}
           />
+          {/*
+            El servidor lo guarda en la variante única del producto. Con
+            presentaciones cada una lleva el suyo, en su hoja, y este se ignora
+            — por eso desaparece en cuanto hay alguna.
+          */}
+          {(namedVariants?.length ?? 0) === 0 ? (
+            <OrbixTextField
+              control={control}
+              name="barcode"
+              label={t('products.fields.barcode')}
+              placeholder={t('products.fields.barcodePlaceholder')}
+              autoCapitalize="characters"
+              keyboardType="default"
+            />
+          ) : null}
           <OrbixTextField
             control={control}
             name="name"

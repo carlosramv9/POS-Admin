@@ -190,9 +190,81 @@ export class ProductsService {
     return item.quantity * factor;
   }
 
+  /**
+   * Comprueba que los códigos de las presentaciones no se repitan DENTRO de la
+   * empresa.
+   *
+   * La restricción no cabe en un índice de `product_variants`: esa tabla no
+   * tiene `tenantId` —su dueño es el producto— y Postgres no admite un índice
+   * único que cruce tablas. Por eso vive aquí, y por eso corre DENTRO de la
+   * transacción del llamador: comprobar fuera dejaría una ventana en la que dos
+   * altas simultáneas pasan las dos.
+   *
+   * `exceptVariantIds` son las variantes del propio producto que se están
+   * reescribiendo: sin excluirlas, guardar sin cambiar el código chocaría
+   * consigo mismo.
+   */
+  private async assertCodesFreeInTenant(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    codes: { sku?: string | null; barcode?: string | null }[],
+    exceptVariantIds: string[] = [],
+  ): Promise<void> {
+    const norm = (v?: string | null) => {
+      const t = v?.trim();
+      return t ? t : null;
+    };
+
+    const skus = [...new Set(codes.map((c) => norm(c.sku)).filter((v): v is string => v !== null))];
+    const barcodes = [...new Set(codes.map((c) => norm(c.barcode)).filter((v): v is string => v !== null))];
+    if (skus.length === 0 && barcodes.length === 0) return;
+
+    // Duplicado dentro del mismo envío: dos presentaciones del mismo producto
+    // con el mismo código. La base no lo vería porque ninguna existe todavía.
+    const dentro = [...codes.map((c) => norm(c.sku)), ...codes.map((c) => norm(c.barcode))].filter(
+      (v): v is string => v !== null,
+    );
+    const repetido = dentro.find((v, i) => dentro.indexOf(v) !== i);
+    if (repetido) {
+      throw new ConflictException(`El código "${repetido}" está repetido entre las presentaciones`);
+    }
+
+    const chocan = await tx.productVariant.findMany({
+      where: {
+        product: { tenantId },
+        id: exceptVariantIds.length ? { notIn: exceptVariantIds } : undefined,
+        OR: [
+          ...(skus.length ? [{ sku: { in: skus } }] : []),
+          ...(barcodes.length ? [{ barcode: { in: barcodes } }] : []),
+        ],
+      },
+      select: { sku: true, barcode: true, product: { select: { name: true } } },
+      take: 1,
+    });
+
+    if (chocan.length > 0) {
+      const ocupado = chocan[0];
+      const codigo = skus.includes(ocupado.sku ?? '') ? ocupado.sku : ocupado.barcode;
+      throw new ConflictException(
+        `El código "${codigo}" ya lo usa "${ocupado.product.name}"`,
+      );
+    }
+  }
+
   async create(createProductDto: CreateProductDto): Promise<Product> {
     const tenantId = this.tenantContext.requireTenantId();
-    const { recipeItems, comboItems, variants, features, aiRequestId, aiOutcome, ...productData } = createProductDto;
+    const {
+      recipeItems,
+      comboItems,
+      variants,
+      features,
+      aiRequestId,
+      aiOutcome,
+      // `barcode` NO es columna de `Product`: viaja aparte y se guarda en la
+      // variante, que es la unidad vendible.
+      barcode: productBarcode,
+      ...productData
+    } = createProductDto;
 
     const existingProduct = await this.prisma.product.findUnique({
       where: { tenantId_sku: { tenantId, sku: productData.sku } },
@@ -263,10 +335,20 @@ export class ProductsService {
       const [primeraConNombre, ...resto] = variants ?? [];
       const naceConPresentacion = primeraConNombre !== undefined;
 
+      await this.assertCodesFreeInTenant(
+        tx,
+        tenantId,
+        naceConPresentacion ? (variants ?? []) : [{ barcode: productBarcode }],
+      );
+
       const defaultVariant = await tx.productVariant.create({
         data: {
           productId: created.id,
           name: naceConPresentacion ? primeraConNombre.name : null,
+          // Sin presentaciones el código capturado en el producto es de su
+          // variante única; con ellas, cada una trae el suyo.
+          sku: naceConPresentacion ? (primeraConNombre.sku ?? null) : null,
+          barcode: naceConPresentacion ? (primeraConNombre.barcode ?? null) : (productBarcode ?? null),
           isDefault: !naceConPresentacion,
           trackInventory: created.trackInventory,
           cost: naceConPresentacion ? (primeraConNombre.cost ?? 0) : (created.costPrice ?? 0),
@@ -331,6 +413,8 @@ export class ProductsService {
             data: {
               productId: created.id,
               name: variant.name,
+              sku: variant.sku ?? null,
+              barcode: variant.barcode ?? null,
               // Misma política de inventario que la default: `trackInventory` es
               // del producto, no de la variante. Sin esto una variante de un
               // RECIPE/COMBO/SERVICE nacía rastreando stock que ese tipo no lleva.
@@ -552,7 +636,14 @@ export class ProductsService {
 
     if (!product) throw new NotFoundException('Product not found');
 
-    const { recipeItems, comboItems, variants, features, ...productData } = updateProductDto;
+    const {
+      recipeItems,
+      comboItems,
+      variants,
+      features,
+      barcode: productBarcode,
+      ...productData
+    } = updateProductDto;
 
     if (productData.categoryId) {
       const category = await this.prisma.category.findUnique({
@@ -661,6 +752,15 @@ export class ProductsService {
           select: { id: true, isDefault: true },
         });
 
+        // Se excluyen las variantes del propio producto: guardar sin cambiar el
+        // código no puede chocar consigo mismo.
+        await this.assertCodesFreeInTenant(
+          tx,
+          tenantId,
+          variants.length > 0 ? variants : [{ barcode: productBarcode }],
+          existing.map((v) => v.id),
+        );
+
         // ADR-0030, regla 4: la default SE PROMUEVE, no se elimina.
         //
         // Al configurar la primera presentación, la variante default —"el
@@ -685,6 +785,8 @@ export class ProductsService {
             data: {
               name: aPromover.name,
               isDefault: false,
+              sku: aPromover.sku ?? null,
+              barcode: aPromover.barcode ?? null,
               cost: aPromover.cost ?? 0,
               price: aPromover.price ?? 0,
             },
@@ -759,7 +861,13 @@ export class ProductsService {
             keepIds.add(variant.id);
             await tx.productVariant.update({
               where: { id: variant.id },
-              data: { name: variant.name, cost: variant.cost ?? 0, price: variant.price ?? 0 },
+              data: {
+                name: variant.name,
+                sku: variant.sku ?? null,
+                barcode: variant.barcode ?? null,
+                cost: variant.cost ?? 0,
+                price: variant.price ?? 0,
+              },
             });
             // Los valores efectivos son los de `branch_inventory`: sin esto,
             // cambiar el precio de una variante existente no se vería en
@@ -785,6 +893,8 @@ export class ProductsService {
               data: {
                 productId: id,
                 name: variant.name,
+                sku: variant.sku ?? null,
+                barcode: variant.barcode ?? null,
                 // Misma política de inventario que el producto — ver el alta.
                 trackInventory: updatedProduct.trackInventory,
                 cost: variant.cost ?? 0,
@@ -829,6 +939,26 @@ export class ProductsService {
           }
         } else if (removed.length > 0) {
           await tx.productVariant.deleteMany({ where: { id: { in: removed } } });
+        }
+      }
+
+      // El código capturado a nivel de producto es el de su variante única. Se
+      // aplica DESPUÉS de sincronizar las presentaciones, cuando ya se sabe
+      // cuántas quedan: con más de una, cada tarjeta lleva el suyo y este campo
+      // no tiene a quién pertenecer.
+      if (productBarcode !== undefined) {
+        const suyas = await tx.productVariant.findMany({
+          where: { productId: id },
+          select: { id: true },
+          take: 2,
+        });
+        if (suyas.length === 1) {
+          const valor = productBarcode.trim() ? productBarcode.trim() : null;
+          await this.assertCodesFreeInTenant(tx, tenantId, [{ barcode: valor }], [suyas[0].id]);
+          await tx.productVariant.update({
+            where: { id: suyas[0].id },
+            data: { barcode: valor },
+          });
         }
       }
 

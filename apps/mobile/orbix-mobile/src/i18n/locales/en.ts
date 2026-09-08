@@ -441,6 +441,8 @@ export const en: TranslationSchema = {
       type: 'Product type',
       sku: 'SKU',
       skuPlaceholder: 'e.g. SHIRT-001',
+      barcode: 'Barcode',
+      barcodePlaceholder: 'Scan it or type it',
       name: 'Name',
       namePlaceholder: 'e.g. Basic T-shirt',
       description: 'Description',

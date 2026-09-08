@@ -27,6 +27,12 @@ export function buildProductSchema(t: TFunction) {
   return z.object({
     type: z.enum([ProductType.SIMPLE, ProductType.RECIPE, ProductType.COMBO, ProductType.SERVICE]),
     sku: z.string().trim().min(2, t('validation.skuTooShort')).max(100),
+    /**
+     * Código de barras. Se guarda en la variante ÚNICA del producto — ADR-0030
+     * pone los códigos en la unidad vendible. Con presentaciones cada una lleva
+     * el suyo y el servidor ignora este.
+     */
+    barcode: z.string().trim().max(100).optional().or(z.literal('')),
     name: z.string().trim().min(2, t('validation.nameTooShort')).max(200),
     description: z.string().trim().max(2000).optional().or(z.literal('')),
     price: money(true),
@@ -52,6 +58,8 @@ export function buildProductSchema(t: TFunction) {
       z.object({
         id: z.string().optional(),
         name: z.string().trim().min(1, t('validation.variantNameRequired')).max(200),
+        sku: z.string().trim().max(100).optional().or(z.literal('')),
+        barcode: z.string().trim().max(100).optional().or(z.literal('')),
         cost: money(false),
         price: money(false),
         stock: integer(),
@@ -65,6 +73,7 @@ export type ProductFormValues = z.infer<ReturnType<typeof buildProductSchema>>;
 export const EMPTY_PRODUCT_FORM: ProductFormValues = {
   type: ProductType.SIMPLE,
   sku: '',
+  barcode: '',
   name: '',
   description: '',
   price: '',
@@ -104,6 +113,10 @@ function toVariantsRequest(values: ProductFormValues): ProductVariantInput[] | u
     .map((variant) => ({
       id: variant.id,
       name: variant.name.trim(),
+      // `undefined` y no `''`: un código vacío es "sin código", no la cadena
+      // vacía, que chocaría con cualquier otra variante también vacía.
+      sku: variant.sku?.trim() || undefined,
+      barcode: variant.barcode?.trim() || undefined,
       cost: num(variant.cost) ?? 0,
       price: num(variant.price) ?? 0,
       stock: num(variant.stock) ?? 0,
@@ -120,6 +133,7 @@ function toBaseRequest(values: ProductFormValues): Omit<CreateProductRequest, 's
     comparePrice: num(values.comparePrice),
     costPrice: num(values.costPrice),
     categoryId: values.categoryId || undefined,
+    barcode: values.barcode?.trim() || undefined,
     status: values.status,
     stock: num(values.stock) ?? 0,
     trackInventory: values.trackInventory,

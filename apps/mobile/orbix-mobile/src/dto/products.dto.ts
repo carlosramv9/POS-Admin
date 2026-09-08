@@ -42,6 +42,13 @@ export interface ProductImageDto {
 export interface ProductVariantDto {
   id: string;
   name: string | null;
+  /**
+   * Códigos de ESTA presentación. ADR-0030 los pone en la variante porque es la
+   * unidad vendible: una talla M y una L son artículos distintos en la caja.
+   * Vacíos, manda el `sku` del producto, que sigue siendo el código padre.
+   */
+  sku: string | null;
+  barcode: string | null;
   isDefault: boolean;
   trackInventory: boolean;
   cost: string | number;
@@ -63,6 +70,8 @@ export interface ProductVariantDto {
 export interface ProductVariantInput {
   id?: string;
   name: string;
+  sku?: string;
+  barcode?: string;
   cost?: number;
   price?: number;
   stock?: number;
@@ -113,6 +122,12 @@ export interface CreateCategoryRequest {
 export interface CreateProductRequest {
   type?: ProductType;
   sku: string;
+  /**
+   * Código de barras del producto sin presentaciones: el servidor lo guarda en
+   * su variante única. Con presentaciones cada una trae el suyo y este se
+   * ignora.
+   */
+  barcode?: string;
   name: string;
   description?: string;
   price: number;
