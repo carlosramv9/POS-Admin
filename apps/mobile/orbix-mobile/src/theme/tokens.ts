@@ -80,8 +80,23 @@ export const palette = {
   darkPrimary: '#0f92f7', // oklch(0.65 0.18 250)
   darkSecondary: '#011b35', // oklch(0.22 0.06 250)
   darkMuted: '#15191d', // oklch(0.21 0.01 250)
-  darkMutedForeground: '#6d7277', // oklch(0.55 0.01 250)
-  darkBorder: '#202429', // oklch(0.26 0.01 250)
+  /**
+   * Etiquetas, placeholders y texto secundario en oscuro. El anterior daba
+   * 4.18:1 sobre el fondo y 2.92:1 sobre la superficie de un input: por debajo
+   * de 4.5:1 en ambos, asi que las etiquetas y sobre todo los placeholders se
+   * leian a medias. Este da 6.70:1 y 4.68:1, y conserva el escalon con
+   * `darkForeground` para que siga siendo texto secundario.
+   */
+  // Se aparta del prototipo (era #6d7277, oklch(0.45 0.01 250)) por contraste.
+  darkMutedForeground: '#8f959b',
+  /**
+   * Borde de inputs y tarjetas en oscuro. El anterior quedaba a 1.30:1 del
+   * fondo: el campo solo se distinguia por su relleno y un input vacio casi
+   * desaparecia. Sube a 2.03:1, suficiente para que el contorno exista sin
+   * convertirse en la linea gris pesada que delata un tema oscuro mal hecho.
+   */
+  // Se aparta del prototipo (era #202429, oklch(0.26 0.01 250)) por contraste.
+  darkBorder: '#3d434a',
   darkDestructive: '#ff6568', // oklch(0.704 0.191 22.216)
 
   /** Splash canvas — literal in the prototype (`#0a0e1a`). */
