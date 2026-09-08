@@ -400,6 +400,11 @@ export const es = {
     sectionVisibility: 'Estado y visibilidad',
     variants: {
       add: 'Agregar variante',
+      /** Tarjeta de una variante todavía sin nombre. */
+      untitled: 'Variante sin nombre',
+      /** La tarjeta abre la hoja con el formulario. */
+      editHint: 'Toca para editar esta presentación',
+      sheetTitleNew: 'Nueva variante',
       name: 'Nombre',
       namePlaceholder: 'Ej. Talla M',
       cost: 'Costo',

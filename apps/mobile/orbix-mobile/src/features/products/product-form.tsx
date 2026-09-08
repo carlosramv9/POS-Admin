@@ -24,7 +24,7 @@
  *   the opposite of "cleaner screen". Whole-record validation still runs on
  *   submit either way (`zodResolver`), so this can't save invalid data.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm, useWatch, type Control, type FieldPath, type UseFormGetValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
@@ -34,6 +34,7 @@ import {
   BackButton,
   FieldGroup,
   InlineError,
+  OrbixBottomSheet,
   OrbixButton,
   OrbixInput,
   OrbixModal,
@@ -41,6 +42,7 @@ import {
   OrbixStepper,
   OrbixText,
   OrbixTextField,
+  type OrbixBottomSheetRef,
   type SelectOption,
 } from '@/components';
 import { PlusIcon, TrashIcon } from '@/components/ui/icons';
@@ -194,8 +196,12 @@ function SwitchRow({ label, hint, value, onValueChange }: { label: string; hint?
  * no tiene dónde escribirlos, y esos tres campos se deshabilitan en vez de
  * fingir que se guardan.
  *
- * Tarjetas apiladas, no una retícula como en el web: cuatro columnas de inputs
- * no caben a lo ancho de un teléfono sin volverse intocables.
+ * Tarjetas de resumen, no un formulario por variante: en la pantalla de
+ * edición, cuatro entradas por presentación multiplicadas por N tapaban el
+ * resto del producto. La tarjeta muestra nombre, precio, costo y existencia; al
+ * tocarla se abre una hoja inferior con los campos, atada al MISMO formulario,
+ * así que cerrar la hoja no confirma nada y guardar el producto es lo que
+ * persiste.
  *
  * `keyName: 'key'` es obligatorio: por defecto `useFieldArray` llama `id` a su
  * clave de render y pisaría el `id` real de la variante — el único dato con el
@@ -216,11 +222,30 @@ function VariantsEditor({
   // Índice pendiente de confirmación: solo para las que ya existen en el
   // servidor, donde quitarlas se lleva su existencia en todas las sucursales.
   const [pendingRemoval, setPendingRemoval] = useState<number | null>(null);
+  // Variante que se está editando en la hoja. `null` = hoja cerrada.
+  const [editing, setEditing] = useState<number | null>(null);
+  const sheetRef = useRef<OrbixBottomSheetRef>(null);
+
+  // Se relee en cada render mientras la hoja está abierta: los campos escriben
+  // en el mismo formulario, así que la tarjeta de atrás queda al día al cerrar.
+  const values = useWatch({ control, name: 'variants' }) ?? [];
+
+  const openSheet = (index: number) => {
+    setEditing(index);
+    sheetRef.current?.expand();
+  };
+
+  const addVariant = () => {
+    append({ name: '', cost: '', price: '', stock: '0' });
+    openSheet(fields.length);
+  };
 
   const requestRemove = (index: number, persisted: boolean) => {
     if (persisted) setPendingRemoval(index);
     else remove(index);
   };
+
+  const editingPersisted = editing === null ? false : Boolean(fields[editing]?.id);
 
   return (
     <View style={{ gap: theme.spacing.md }}>
@@ -250,50 +275,100 @@ function VariantsEditor({
         // existencia inicial — en las existentes el servidor la ignora, porque
         // el stock se mueve por movimientos de inventario.
         const persisted = Boolean(field.id);
+        const actual = values[index] ?? field;
+        const nombre = (actual.name ?? '').trim();
+
         return (
-          <View
+          <Pressable
             key={field.key}
-            style={{
-              gap: theme.spacing.sm + 2,
+            onPress={() => openSheet(index)}
+            accessibilityRole="button"
+            accessibilityLabel={nombre || t('products.variants.untitled')}
+            accessibilityHint={t('products.variants.editHint')}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: theme.spacing.md,
               padding: theme.spacing.md,
               borderRadius: theme.radius.lg,
               borderWidth: 1,
               borderColor: theme.colors.border,
+              // `card` sobre el fondo de la pantalla: en claro levanta la
+              // tarjeta y en oscuro la separa del negro. Sale del tema, así que
+              // sigue el modo del sistema sin ramas por color.
               backgroundColor: theme.colors.card,
-            }}
+              opacity: pressed ? 0.7 : 1,
+            })}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: theme.spacing.sm + 2 }}>
-              <View style={{ flex: 1 }}>
-                <OrbixTextField
-                  control={control}
-                  name={`variants.${index}.name`}
-                  label={t('products.variants.name')}
-                  placeholder={t('products.variants.namePlaceholder')}
-                  autoCapitalize="sentences"
-                />
-              </View>
-              <Pressable
-                onPress={() => requestRemove(index, persisted)}
-                accessibilityRole="button"
-                accessibilityLabel={t('products.variants.remove')}
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: theme.radius.lg,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: theme.colors.dangerBg,
-                }}
-              >
-                <TrashIcon size={16} color={theme.colors.dangerFg} />
-              </Pressable>
+            <View style={{ flex: 1, gap: 2 }}>
+              <OrbixText size="sm" weight="semibold" numberOfLines={1}>
+                {nombre || t('products.variants.untitled')}
+              </OrbixText>
+              <OrbixText size="xs" tone="mutedForeground" numberOfLines={1}>
+                {[
+                  `${t('products.variants.price')} ${actual.price || '0'}`,
+                  `${t('products.variants.cost')} ${actual.cost || '0'}`,
+                  `${t('products.variants.stock')} ${actual.stock || '0'}`,
+                ].join('  ·  ')}
+              </OrbixText>
             </View>
+
+            <Pressable
+              onPress={() => requestRemove(index, persisted)}
+              accessibilityRole="button"
+              accessibilityLabel={t('products.variants.remove')}
+              hitSlop={8}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: theme.radius.lg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: theme.colors.dangerBg,
+              }}
+            >
+              <TrashIcon size={16} color={theme.colors.dangerFg} />
+            </Pressable>
+          </Pressable>
+        );
+      })}
+
+      <OrbixButton label={t('products.variants.add')} variant="secondary" onPress={addVariant} />
+
+      {/*
+        El formulario vive AQUÍ, no en la tarjeta. En la pantalla de edición las
+        cuatro entradas por variante multiplicadas por N presentaciones tapaban
+        el resto del producto; la tarjeta resume y la hoja edita.
+
+        Los campos apuntan al mismo `control`, así que escriben en el formulario
+        real: cerrar la hoja no confirma nada, y guardar el producto es lo que
+        persiste. Por eso no hay botón de "guardar" dentro.
+      */}
+      <OrbixBottomSheet
+        ref={sheetRef}
+        title={
+          editing !== null && (values[editing]?.name ?? '').trim()
+            ? (values[editing]?.name ?? '').trim()
+            : t('products.variants.sheetTitleNew')
+        }
+        keyboardBehavior="interactive"
+        onClose={() => setEditing(null)}
+      >
+        {editing !== null ? (
+          <View style={{ gap: theme.spacing.md }}>
+            <OrbixTextField
+              control={control}
+              name={`variants.${editing}.name`}
+              label={t('products.variants.name')}
+              placeholder={t('products.variants.namePlaceholder')}
+              autoCapitalize="sentences"
+            />
 
             <View style={{ flexDirection: 'row', gap: theme.spacing.sm + 2 }}>
               <View style={{ flex: 1 }}>
                 <OrbixTextField
                   control={control}
-                  name={`variants.${index}.cost`}
+                  name={`variants.${editing}.cost`}
                   label={t('products.variants.cost')}
                   keyboardType="decimal-pad"
                   editable={branchScoped}
@@ -302,7 +377,7 @@ function VariantsEditor({
               <View style={{ flex: 1 }}>
                 <OrbixTextField
                   control={control}
-                  name={`variants.${index}.price`}
+                  name={`variants.${editing}.price`}
                   label={t('products.variants.price')}
                   keyboardType="decimal-pad"
                   editable={branchScoped}
@@ -313,26 +388,26 @@ function VariantsEditor({
             <View style={{ width: '50%' }}>
               <OrbixTextField
                 control={control}
-                name={`variants.${index}.stock`}
+                name={`variants.${editing}.stock`}
                 label={t('products.variants.stock')}
                 keyboardType="number-pad"
-                editable={branchScoped && !persisted}
+                editable={branchScoped && !editingPersisted}
               />
             </View>
-            {persisted ? (
+            {editingPersisted ? (
               <OrbixText size="xs" tone="mutedForeground">
                 {t('products.variants.stockReadonlyHint')}
               </OrbixText>
             ) : null}
-          </View>
-        );
-      })}
 
-      <OrbixButton
-        label={t('products.variants.add')}
-        variant="secondary"
-        onPress={() => append({ name: '', cost: '', price: '', stock: '0' })}
-      />
+            <OrbixButton
+              label={t('common.done')}
+              variant="secondary"
+              onPress={() => sheetRef.current?.close()}
+            />
+          </View>
+        ) : null}
+      </OrbixBottomSheet>
 
       <OrbixModal
         visible={pendingRemoval !== null}

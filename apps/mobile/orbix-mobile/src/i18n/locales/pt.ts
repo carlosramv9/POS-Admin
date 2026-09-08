@@ -398,6 +398,11 @@ export const pt: TranslationSchema = {
     sectionVisibility: 'Status e visibilidade',
     variants: {
       add: 'Adicionar variação',
+      /** Tarjeta de una variante todavía sin nombre. */
+      untitled: 'Variante sem nome',
+      /** La tarjeta abre la hoja con el formulario. */
+      editHint: 'Toque para editar esta variante',
+      sheetTitleNew: 'Nova variante',
       name: 'Nome',
       namePlaceholder: 'Ex. Tamanho M',
       cost: 'Custo',

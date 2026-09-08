@@ -31,6 +31,13 @@ export interface OrbixBottomSheetProps {
   /** Snap points as percentages or pixels; defaults to content height. */
   snapPoints?: (string | number)[];
   onClose?: () => void;
+  /**
+   * Sheets that CONTAIN inputs need `interactive`, o el teclado tapa el campo
+   * que se está escribiendo. Los que solo listan opciones no lo necesitan, y
+   * por eso no es el valor por defecto: `interactive` reposiciona la hoja en
+   * cada foco y en una lista larga eso se ve como un salto.
+   */
+  keyboardBehavior?: 'extend' | 'fillParent' | 'interactive';
 }
 
 /** Matches the subset of the plain `BottomSheet` ref that call sites use. */
@@ -40,7 +47,7 @@ export interface OrbixBottomSheetRef {
 }
 
 export const OrbixBottomSheet = forwardRef<OrbixBottomSheetRef, OrbixBottomSheetProps>(
-  function OrbixBottomSheet({ title, children, snapPoints, onClose }, ref) {
+  function OrbixBottomSheet({ title, children, snapPoints, onClose, keyboardBehavior }, ref) {
     const theme = useTheme();
     const insets = useSafeAreaInsets();
     const modalRef = useRef<BottomSheetModal>(null);
@@ -73,6 +80,9 @@ export const OrbixBottomSheet = forwardRef<OrbixBottomSheetRef, OrbixBottomSheet
         enablePanDownToClose
         backdropComponent={renderBackdrop}
         onDismiss={onClose}
+        {...(keyboardBehavior ? { keyboardBehavior } : {})}
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
         backgroundStyle={{
           backgroundColor: theme.colors.card,
           borderTopLeftRadius: theme.radius['3xl'],
